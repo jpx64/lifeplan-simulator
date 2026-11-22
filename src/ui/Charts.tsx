@@ -14,7 +14,7 @@ import {
 import type { MonteCarloResult } from '../engine/montecarlo'
 import { EXPENSE_LABELS, type ExpenseKey, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
-import { axisYen, man } from './format'
+import { axisYen, man, pct } from './format'
 
 const GROUPS = [
   { key: 'cash', label: '預貯金', color: 'var(--c1)' },
@@ -64,6 +64,41 @@ function xLabel(selfId: string) {
   return (r: YearRow) => `${r.year}（${r.ages[selfId]}歳）`
 }
 
+interface TipItem {
+  label: string
+  value: number
+  color?: string
+}
+
+/** Tooltip body: the items, a bold total row, then optional rows outside the total. */
+function ChartTip({ title, items, total, after = [], shares }: { title: string; items: TipItem[]; total: TipItem; after?: TipItem[]; shares?: boolean }) {
+  const row = (it: TipItem, className?: string, share?: boolean) => (
+    <tr key={it.label} className={className}>
+      <th>
+        {it.color && <span className="swatch" style={{ background: it.color }} />}
+        {it.label}
+      </th>
+      <td className={it.value < 0 ? 'neg' : undefined}>{man(it.value)}</td>
+      {shares && <td className="share">{share && total.value > 0 ? pct(it.value / total.value, 0) : ''}</td>}
+    </tr>
+  )
+  return (
+    <div className="chart-tip">
+      <div className="chart-tip-title">{title}</div>
+      <table>
+        <tbody>{items.map((it) => row(it, undefined, true))}</tbody>
+        <tfoot>
+          {row(total, 'total')}
+          {after.map((it) => row(it))}
+        </tfoot>
+      </table>
+    </div>
+  )
+}
+
+/** Rows that round to 0万円 only add noise to a tooltip. */
+const visible = (it: TipItem) => Math.round(it.value / 10_000) !== 0
+
 type ClickState = { activeTooltipIndex?: number | string | null } | null | undefined
 
 function onYearClick(years: YearRow[], onSelect?: (year: number) => void) {
@@ -81,8 +116,9 @@ export function AssetChart({ plan, years, selected, onSelect }: { plan: Plan; ye
   const data = years.map((y) => {
     const g = { cash: y.cash, nisa: 0, taxable: 0, pension: 0 }
     for (const [id, bal] of Object.entries(y.accounts)) g[groupOf(plan, id)] += bal
-    return { label: xLabel(selfId)(y), ...g, loan: -y.loanBalance, total: y.totalAssets }
+    return { label: xLabel(selfId)(y), year: y.year, age: y.ages[selfId], ...g, loan: -y.loanBalance, total: y.totalAssets }
   })
+  type Row = (typeof data)[number]
   const sel = years.find((y) => y.year === selected)
   return (
     <ResponsiveContainer width="100%" height={340}>
@@ -90,13 +126,29 @@ export function AssetChart({ plan, years, selected, onSelect }: { plan: Plan; ye
         <CartesianGrid stroke="var(--grid)" vertical={false} />
         <XAxis dataKey="label" {...axisProps} minTickGap={40} />
         <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [man(Math.abs(Number(v))), name]} />
-        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder([...GROUPS.map((g) => g.key), 'loan'])} />
+        <Tooltip
+          content={({ active, payload }) => {
+            const r = payload?.[0]?.payload as Row | undefined
+            if (!active || !r) return null
+            const loan = -r.loan
+            return (
+              <ChartTip
+                title={`${r.year}年（${r.age}歳）12月末`}
+                // listed top-down, in the order the areas are stacked on screen
+                items={[...GROUPS].reverse().map((g) => ({ label: g.label, value: r[g.key], color: g.color })).filter(visible)}
+                total={{ label: '資産合計', value: r.total }}
+                after={loan > 0 ? [{ label: '住宅ローン残高', value: loan, color: 'var(--c5)' }, { label: '差し引き（資産 − ローン）', value: r.total - loan }] : []}
+              />
+            )
+          }}
+        />
+        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder([...GROUPS.map((g) => g.key), 'total', 'loan'])} />
         <ReferenceLine y={0} stroke="var(--border-strong)" />
         {sel && <ReferenceLine x={xLabel(selfId)(sel)} stroke="var(--text)" strokeDasharray="4 3" />}
         {GROUPS.map((g) => (
           <Area key={g.key} type="monotone" dataKey={g.key} name={g.label} stackId="a" stroke={g.color} fill={g.color} fillOpacity={0.75} />
         ))}
+        <Line type="monotone" dataKey="total" name="資産合計" stroke="var(--text)" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
         <Line type="monotone" dataKey="loan" name="住宅ローン残高" stroke="var(--c5)" strokeWidth={2} dot={false} />
       </ComposedChart>
     </ResponsiveContainer>
@@ -131,14 +183,29 @@ export function CashflowChart({ plan, years, onSelect }: { plan: Plan; years: Ye
 export function ExpenseChart({ plan, years, onSelect }: { plan: Plan; years: YearRow[]; onSelect?: (year: number) => void }) {
   const selfId = selfIdOf(plan)
   const keys = (Object.keys(EXPENSE_LABELS) as ExpenseKey[]).filter((k) => years.some((y) => y.expenseBreakdown[k] > 0))
-  const data = years.map((y) => ({ label: xLabel(selfId)(y), ...y.expenseBreakdown }))
+  const data = years.map((y) => ({ label: xLabel(selfId)(y), year: y.year, age: y.ages[selfId], total: y.expenses, ...y.expenseBreakdown }))
+  type Row = (typeof data)[number]
   return (
     <ResponsiveContainer width="100%" height={300}>
       <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} onClick={onYearClick(years, onSelect)} style={{ cursor: onSelect ? 'pointer' : undefined }}>
         <CartesianGrid stroke="var(--grid)" vertical={false} />
         <XAxis dataKey="label" {...axisProps} minTickGap={40} />
         <YAxis tickFormatter={axisYen} {...axisProps} width={64} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [man(Number(v)), name]} />
+        <Tooltip
+          cursor={{ fill: 'var(--grid)' }}
+          content={({ active, payload }) => {
+            const r = payload?.[0]?.payload as Row | undefined
+            if (!active || !r) return null
+            return (
+              <ChartTip
+                title={`${r.year}年（${r.age}歳）`}
+                items={[...keys].reverse().map((k) => ({ label: EXPENSE_LABELS[k], value: r[k], color: EXPENSE_COLORS[k] })).filter(visible)}
+                total={{ label: '支出合計', value: r.total }}
+                shares
+              />
+            )
+          }}
+        />
         <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(keys)} />
         {keys.map((k) => (
           <Bar key={k} dataKey={k} name={EXPENSE_LABELS[k]} stackId="e" fill={EXPENSE_COLORS[k]} />

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { accountLabels, simulate } from '../engine/simulate'
-import { kpis, yearly } from '../engine/summary'
+import { kpis, yearly, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
 import { AssetChart, CashflowChart, ExpenseChart } from './Charts'
-import { man, pct, ymLabel } from './format'
+import { man, manOku, pct, ymLabel } from './format'
 import { MonteCarloPanel } from './MonteCarlo'
 import { YearDetail } from './YearDetail'
 
@@ -131,7 +131,7 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
 
       <section className="card">
         <h2>資産の推移</h2>
-        <p className="note">各年の12月末時点。住宅ローン残高は負の値で表示しています。グラフをクリックすると、その年の内訳を表示します。</p>
+        <p className="note">各年の12月末時点。いちばん上の線が資産合計、住宅ローン残高は負の値で表示しています。カーソルを合わせると合計とローンを差し引いた額、クリックするとその年の内訳を表示します。</p>
         <AssetChart plan={effective} years={years} selected={selectedYear} onSelect={setSelectedYear} />
       </section>
 
@@ -145,7 +145,8 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
 
       <section className="card">
         <h2>支出の内訳</h2>
-        <p className="note">住居費には住宅ローンの返済・固定資産税・修繕費、教育には保育料・学費を含みます。</p>
+        <p className="note">住居費には住宅ローンの返済・固定資産税・修繕費、教育には保育料・学費を含みます。グラフにカーソルを合わせると、その年の合計と割合を表示します。</p>
+        <ExpenseStats years={years} real={real} />
         <ExpenseChart plan={effective} years={years} onSelect={setSelectedYear} />
       </section>
 
@@ -165,6 +166,34 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
         </ul>
       </section>
     </div>
+  )
+}
+
+/** Totals over the whole period, shown above the expense chart. */
+function ExpenseStats({ years, real }: { years: YearRow[]; real: boolean }) {
+  if (years.length === 0) return null
+  const total = years.reduce((s, y) => s + y.expenses, 0)
+  const months = years.reduce((s, y) => s + y.months.length, 0)
+  const peak = years.reduce((a, b) => (b.expenses > a.expenses ? b : a))
+  return (
+    <dl className="stat-line">
+      <div>
+        <dt>
+          {years[0].year}〜{years.at(-1)!.year}年の支出合計{real ? '（いまの物価）' : ''}
+        </dt>
+        <dd>{manOku(total)}</dd>
+      </div>
+      <div>
+        <dt>1年あたり平均</dt>
+        <dd>{man(months ? (total / months) * 12 : 0)}</dd>
+      </div>
+      <div>
+        <dt>いちばん多い年</dt>
+        <dd>
+          {peak.year}年 {man(peak.expenses)}
+        </dd>
+      </div>
+    </dl>
   )
 }
 

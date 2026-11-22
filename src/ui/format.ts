@@ -29,3 +29,12 @@ export function currentYM(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+
+/** 234,560,000 → "2億3,456万円" (below 1億, same as man()). */
+export function manOku(yen: number): string {
+  const sign = yen < 0 ? '-' : ''
+  const v = Math.round(Math.abs(yen) / 10_000)
+  if (v < 10_000) return `${sign}${v.toLocaleString('ja-JP')}万円`
+  const rest = v % 10_000
+  return `${sign}${Math.floor(v / 10_000).toLocaleString('ja-JP')}億${rest ? `${rest.toLocaleString('ja-JP')}万` : ''}円`
+}

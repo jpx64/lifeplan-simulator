@@ -23,6 +23,8 @@
   --c7: #c46aa8;
   --c8: #8a9a3c;
   --c9: #8a7f72;
+  --zebra: #f6f8fa;
+  --bar-fill: rgba(76, 123, 217, 0.16);
   --radius: 10px;
   --shadow: 0 1px 2px rgba(20, 30, 50, 0.06);
   color-scheme: light;
@@ -54,6 +56,8 @@
     --c7: #dc8ac2;
     --c8: #b0c25a;
     --c9: #b3a898;
+    --zebra: #1e2530;
+    --bar-fill: rgba(111, 156, 240, 0.2);
     --shadow: none;
     color-scheme: dark;
   }
@@ -494,7 +498,7 @@ input[type='number'] {
 }
 .num-table tr.bad td,
 .num-table tr.bad th {
-  background: var(--warn-bg);
+  background-color: var(--warn-bg);
 }
 .mini-table {
   border-collapse: collapse;
@@ -803,11 +807,11 @@ input[type='number'] {
 }
 .num-table.clickable tbody tr:hover td,
 .num-table.clickable tbody tr:hover th {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
 }
 .num-table tr.selected td,
 .num-table tr.selected th {
-  background: var(--accent-soft);
+  background-color: var(--accent-soft);
 }
 .timeline .when.link {
   text-align: left;
@@ -827,4 +831,220 @@ ul.plain li {
   padding: 10px 12px;
   margin: 0 0 12px;
   font-size: 0.9rem;
+}
+
+/* ---------- chart tooltip ---------- */
+.chart-tip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px 6px;
+  font-size: 13px;
+  color: var(--text);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  min-width: 220px;
+}
+.chart-tip-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.chart-tip table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tip th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 1px 12px 1px 0;
+  white-space: nowrap;
+}
+.chart-tip td {
+  text-align: right;
+  padding: 1px 0;
+  white-space: nowrap;
+}
+.chart-tip td.share {
+  color: var(--muted);
+  padding-left: 10px;
+  min-width: 3.2em;
+}
+.chart-tip .swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: 0;
+}
+.chart-tip tr.total th,
+.chart-tip tr.total td {
+  border-top: 1px solid var(--border-strong);
+  padding-top: 4px;
+  font-weight: 700;
+  color: var(--text);
+}
+.chart-tip tfoot tr.total + tr th,
+.chart-tip tfoot tr.total + tr td {
+  padding-top: 6px;
+}
+
+/* ---------- period totals ---------- */
+.stat-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+.stat-line dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.stat-line dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- year table ---------- */
+.year-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.year-table th,
+.year-table td {
+  padding: 6px 12px;
+}
+.year-table thead th {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  vertical-align: bottom;
+  border-bottom: 1px solid var(--border-strong);
+}
+/* first header row: column group names */
+.year-table thead .group-row th {
+  top: 0;
+  height: 30px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  text-align: left;
+  color: var(--text);
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+}
+/* group names stay in view (right of the year column) while scrolling sideways */
+.year-table .group-label {
+  position: sticky;
+  left: calc(var(--year-col-w) + 12px);
+}
+.year-table thead .group-row th[rowspan] {
+  border-bottom: 1px solid var(--border-strong);
+}
+.year-table thead tr + tr th {
+  top: 30px;
+}
+.year-table thead th.signed,
+.year-table thead th.bar {
+  color: var(--text);
+}
+.year-table thead th.text {
+  text-align: left;
+}
+.year-table {
+  --year-col-w: 60px;
+}
+.year-table .year-col {
+  position: sticky;
+  left: 0;
+  width: var(--year-col-w);
+  min-width: var(--year-col-w);
+  text-align: left;
+  font-weight: 700;
+  box-shadow: inset -1px 0 var(--border);
+}
+/* stacking: header row > sticky year column > bars in the body */
+.year-table thead th {
+  z-index: 3;
+}
+.year-table thead .year-col {
+  z-index: 4;
+}
+.year-table tbody .year-col {
+  z-index: 2;
+}
+/* vertical rule where a column group starts */
+.year-table .gs {
+  border-left: 1px solid var(--border-strong);
+}
+.year-table tbody > tr > * {
+  background-color: var(--surface);
+  border-bottom: 1px solid var(--grid);
+}
+.year-table tbody > tr:nth-child(even) > * {
+  background-color: var(--zebra);
+}
+.year-table tbody > tr.bad > * {
+  background-color: var(--warn-bg);
+}
+.year-table tbody > tr:hover > * {
+  background-color: var(--surface-2);
+}
+.year-table tbody > tr.selected > * {
+  background-color: var(--accent-soft);
+}
+.year-table .age {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.year-table td.zero {
+  color: var(--border-strong);
+}
+.year-table td.detail {
+  font-size: 0.8rem;
+}
+.year-table td.signed {
+  font-weight: 700;
+}
+.year-table td.pos {
+  color: var(--good);
+}
+/* 資産合計: value with a bar behind it, scaled to the largest year */
+.year-table td.bar {
+  position: relative;
+  font-weight: 700;
+  min-width: 120px;
+}
+.year-table td.bar::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  height: 18px;
+  margin-top: -9px;
+  width: max(3px, calc((100% - 16px) * var(--bar, 0)));
+  background: var(--bar-fill);
+  border-radius: 4px;
+}
+.year-table td.bar > span {
+  position: relative;
+}
+.year-table td.events {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  min-width: 260px;
+}
+
+@media (max-width: 720px) {
+  .year-table th,
+  .year-table td {
+    padding: 5px 8px;
+  }
 }
