@@ -1048,3 +1048,144 @@ ul.plain li {
     padding: 5px 8px;
   }
 }
+
+/* ---------- scenario compare ---------- */
+.compare > .segmented {
+  margin: 0 0 16px;
+}
+.axis-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.axis-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  min-width: 7em;
+}
+.chip em,
+.matrix em {
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: 4px;
+}
+.chip .swatch,
+.matrix .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.matrix .swatch {
+  margin-right: 6px;
+}
+.line-sample {
+  display: inline-block;
+  width: 22px;
+  border-top: 3px solid var(--muted);
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.line-sample.dashed {
+  border-top-style: dashed;
+}
+details.assumptions {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+details.assumptions[open] > summary {
+  margin-bottom: 10px;
+}
+details.assumptions > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+details.assumptions h3 {
+  font-size: 0.9rem;
+  margin: 14px 0 6px;
+}
+details.assumptions + .callout {
+  margin: 12px 0 0;
+}
+
+.matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.matrix th,
+.matrix td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--grid);
+}
+.matrix thead th {
+  background: var(--surface-2);
+  font-size: 0.85rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border-strong);
+}
+.matrix tbody th {
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+.matrix td {
+  text-align: right;
+  border-left: 1px solid var(--grid);
+  min-width: 150px;
+}
+.matrix td strong {
+  display: block;
+  font-size: 1.15rem;
+}
+.matrix td small {
+  display: block;
+}
+.matrix td.current {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-soft);
+}
+.diff {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+.diff.pos {
+  color: var(--good);
+}
+.diff.neg {
+  color: var(--bad);
+}
+.scenario-table tbody th.text {
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 0;
+}
+.scenario-table td {
+  vertical-align: top;
+}
+@media (max-width: 720px) {
+  .matrix th,
+  .matrix td {
+    padding: 8px;
+  }
+  .matrix td {
+    min-width: 0;
+  }
+  .matrix td strong {
+    font-size: 1rem;
+  }
+}

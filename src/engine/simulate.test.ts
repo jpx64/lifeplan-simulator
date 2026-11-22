@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { childAllowanceMonthly, parentalLeaveBenefit } from './benefits'
-import { defaultPurchase, defaultSettings, samplePlan } from './defaults'
+import { defaultPurchase, defaultSettings } from './defaults'
+import { samplePlan } from './sample'
 import { loanSchedule, pmt, propertyTaxAnnual } from './housing'
 import { NISA_ANNUAL_LIMIT, simulate } from './simulate'
 import { schoolAge, ymToIndex } from './time'

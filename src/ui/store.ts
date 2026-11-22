@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { samplePlan } from '../engine/defaults'
+import { samplePlan } from '../engine/sample'
 import type { Plan } from '../engine/types'
 
 const KEY = 'lifeplan-simulator:v1'
@@ -15,7 +15,8 @@ function load(): Saved | null {
     if (!raw) return null
     const data = JSON.parse(raw) as Saved
     if (!Array.isArray(data.plans) || data.plans.length === 0) return null
-    return data
+    // the sample used to be built by hand; replace it with the current one (built from かんたん入力 answers)
+    return { ...data, plans: data.plans.map((p) => (p.id === 'sample' && !p.wizard ? samplePlan() : p)) }
   } catch {
     return null
   }
@@ -47,8 +48,8 @@ export function usePlans() {
     setState((s) => ({ ...s, plans: s.plans.map((p) => (p.id === plan.id ? plan : p)) }))
   }, [])
 
-  const add = useCallback((plan: Plan) => {
-    setState((s) => ({ plans: [...s.plans, plan], activeId: plan.id }))
+  const add = useCallback((plan: Plan, select = true) => {
+    setState((s) => ({ plans: [...s.plans, plan], activeId: select ? plan.id : s.activeId }))
   }, [])
 
   const select = useCallback((id: string) => setState((s) => ({ ...s, activeId: id })), [])

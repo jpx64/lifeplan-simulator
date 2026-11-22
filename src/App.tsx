@@ -33,8 +33,11 @@ export default function App() {
   const [real, setReal] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // the sample's answers are not offered for editing: かんたん入力 on the sample creates a new plan
+  const ownWizard = active.id === 'sample' ? undefined : active.wizard
+
   const finishWizard = (w: Parameters<typeof buildPlan>[0]) => {
-    if (active.wizard) store.update(buildPlan(w, active.id, active.name))
+    if (ownWizard) store.update(buildPlan(w, active.id, active.name))
     else store.add(buildPlan(w, newId(), plans.some((p) => p.name === 'わが家のプラン') ? `わが家のプラン ${plans.length + 1}` : 'わが家のプラン'))
     setTab('result')
   }
@@ -137,7 +140,7 @@ export default function App() {
         )}
         {tab === 'result' && <Dashboard key={active.id} plan={active} onApply={store.update} real={real} />}
         {tab === 'table' && <YearTable plan={active} real={real} />}
-        {tab === 'compare' && <Compare plans={plans} real={real} />}
+        {tab === 'compare' && <Compare plan={active} plans={plans} real={real} onSave={(p) => store.add(p, false)} />}
         {tab === 'risk' && <Risk key={active.id} plan={active} real={real} />}
         {tab === 'assumptions' && <Assumptions />}
         {tab === 'wizard' && (
@@ -147,13 +150,13 @@ export default function App() {
             )}
             <Wizard
               key={`${active.id}-${wizardKey}`}
-              initial={active.wizard ?? defaultWizard(currentYM())}
+              initial={ownWizard ?? defaultWizard(currentYM())}
               onFinish={(w) => {
                 finishWizard(w)
                 setWizardKey((k) => k + 1)
               }}
               onCancel={() => setTab('result')}
-              finishLabel={active.wizard ? 'この内容でプランを作り直す' : 'この内容でプランを作る'}
+              finishLabel={ownWizard ? 'この内容でプランを作り直す' : 'この内容でプランを作る'}
             />
           </>
         )}

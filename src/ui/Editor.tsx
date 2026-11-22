@@ -38,7 +38,7 @@ export function Editor({ plan, onChange }: { plan: Plan; onChange: (p: Plan) => 
         ))}
       </nav>
       <div className="editor-body">
-        {plan.wizard && (
+        {plan.wizard && plan.id !== 'sample' && (
           <p className="callout">
             ここで変更した内容は、「かんたん入力」をやり直すと上書きされます。
           </p>

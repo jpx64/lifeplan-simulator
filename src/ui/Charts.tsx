@@ -71,7 +71,7 @@ interface TipItem {
 }
 
 /** Tooltip body: the items, a bold total row, then optional rows outside the total. */
-function ChartTip({ title, items, total, after = [], shares }: { title: string; items: TipItem[]; total: TipItem; after?: TipItem[]; shares?: boolean }) {
+function ChartTip({ title, items, total, after = [], shares }: { title: string; items: TipItem[]; total?: TipItem; after?: TipItem[]; shares?: boolean }) {
   const row = (it: TipItem, className?: string, share?: boolean) => (
     <tr key={it.label} className={className}>
       <th>
@@ -79,7 +79,7 @@ function ChartTip({ title, items, total, after = [], shares }: { title: string; 
         {it.label}
       </th>
       <td className={it.value < 0 ? 'neg' : undefined}>{man(it.value)}</td>
-      {shares && <td className="share">{share && total.value > 0 ? pct(it.value / total.value, 0) : ''}</td>}
+      {shares && <td className="share">{share && total && total.value > 0 ? pct(it.value / total.value, 0) : ''}</td>}
     </tr>
   )
   return (
@@ -87,10 +87,12 @@ function ChartTip({ title, items, total, after = [], shares }: { title: string; 
       <div className="chart-tip-title">{title}</div>
       <table>
         <tbody>{items.map((it) => row(it, undefined, true))}</tbody>
-        <tfoot>
-          {row(total, 'total')}
-          {after.map((it) => row(it))}
-        </tfoot>
+        {(total || after.length > 0) && (
+          <tfoot>
+            {total && row(total, 'total')}
+            {after.map((it) => row(it))}
+          </tfoot>
+        )}
       </table>
     </div>
   )
@@ -244,8 +246,20 @@ export function BandChart({ mc, deterministic }: { mc: MonteCarloResult; determi
   )
 }
 
-export function CompareChart({ series, field = 'totalAssets' }: { series: { name: string; years: YearRow[]; selfId: string }[]; field?: 'totalAssets' | 'liquidAssets' }) {
-  const colors = ['var(--c1)', 'var(--c2)', 'var(--c5)', 'var(--c3)']
+export interface CompareSeries {
+  name: string
+  years: YearRow[]
+  selfId: string
+  color?: string
+  dashed?: boolean
+  /** Drawn thicker (e.g. the plan as it is). */
+  bold?: boolean
+}
+
+const COMPARE_COLORS = ['var(--c1)', 'var(--c2)', 'var(--c5)', 'var(--c3)']
+
+export function CompareChart({ series, field = 'totalAssets' }: { series: CompareSeries[]; field?: 'totalAssets' | 'liquidAssets' }) {
+  const colorOf = (s: CompareSeries, i: number) => s.color ?? COMPARE_COLORS[i % COMPARE_COLORS.length]
   const byAge = new Map<number, Record<string, number | string>>()
   series.forEach((s, i) => {
     for (const y of s.years) {
@@ -262,11 +276,31 @@ export function CompareChart({ series, field = 'totalAssets' }: { series: { name
         <CartesianGrid stroke="var(--grid)" vertical={false} />
         <XAxis dataKey="age" {...axisProps} minTickGap={30} />
         <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [man(Number(v)), name]} />
+        <Tooltip
+          content={({ active, payload }) => {
+            const r = payload?.[0]?.payload as Record<string, number | string> | undefined
+            if (!active || !r) return null
+            const items = series
+              .map((s, i) => ({ label: s.name, value: r[`s${i}`] as number, color: colorOf(s, i) }))
+              .filter((it) => typeof it.value === 'number')
+              .sort((a, b) => b.value - a.value)
+            return <ChartTip title={`本人が${r.age}のとき`} items={items} />
+          }}
+        />
         <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(series.map((_, i) => `s${i}`))} />
         <ReferenceLine y={0} stroke="var(--border-strong)" />
         {series.map((s, i) => (
-          <Line key={i} type="monotone" dataKey={`s${i}`} name={s.name} stroke={colors[i % colors.length]} strokeWidth={2} dot={false} />
+          <Line
+            key={i}
+            type="monotone"
+            dataKey={`s${i}`}
+            name={s.name}
+            stroke={colorOf(s, i)}
+            strokeWidth={s.bold ? 3 : 2}
+            strokeDasharray={s.dashed ? '6 4' : undefined}
+            legendType="plainline"
+            dot={false}
+          />
         ))}
       </ComposedChart>
     </ResponsiveContainer>

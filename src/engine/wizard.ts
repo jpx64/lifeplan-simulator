@@ -398,6 +398,47 @@ function accountsFor(id: string, a: WizardAdult, w: WizardInput): Account[] {
   return accs
 }
 
+/** Rent and purchase from the housing answers (rent until the purchase, or for good). */
+export function buildHousing(h: WizardInput['housing'], start: YM): Plan['housing'] {
+  const startT = ymToIndex(start)
+  const buyT = ymToIndex(h.buyYM)
+  const housing: Plan['housing'] = { rents: [] }
+  if (h.mode === 'rent' || buyT > startT) {
+    housing.rents.push({ id: 'rent', label: '賃貸', from: start, to: h.mode === 'buy' ? indexToYm(buyT - 1) : undefined, monthlyRent: h.rent, renewalMonths: 1 })
+  }
+  if (h.mode === 'buy') {
+    const p = defaultPurchase(h.buyYM, 'self')
+    const loanAmount = Math.max(0, h.price - h.downPayment)
+    housing.purchase = {
+      ...p,
+      price: h.price,
+      homeType: h.homeType,
+      landShare: h.homeType === 'condo' ? 0.2 : 0.5,
+      wooden: h.homeType === 'house',
+      isNew: h.isNew,
+      longLife: h.performance === 'longLife',
+      managementFee: h.homeType === 'condo' ? h.condoFees * 0.45 : 0,
+      repairReserve: h.homeType === 'condo' ? h.condoFees * 0.55 : 0,
+      repairs: h.homeType === 'condo' ? [{ label: '室内リフォーム', everyYears: 20, amount: 2_000_000 }] : p.repairs,
+      loanDeductionLimit: loanDeductionLimit(h.performance, h.isNew, h.childRearing),
+      loanDeductionYears: h.isNew ? 13 : 10,
+      loan:
+        loanAmount > 0
+          ? {
+              amount: loanAmount,
+              years: h.loanYears,
+              rates: [0, 1, 2, 3].map((k) => ({ fromYear: 1 + k * 5, rate: h.initialRate + k * h.rateRiseEvery5y })),
+              prepayments: [],
+              payoffAge: h.payoffAge > 0 ? h.payoffAge : undefined,
+              fiveYearRule: !!h.fiveYearRule && h.rateRiseEvery5y > 0,
+              borrowerId: 'self',
+            }
+          : undefined,
+    }
+  }
+  return housing
+}
+
 export function buildPlan(input: WizardInput, id = 'plan', name = 'わが家のプラン'): Plan {
   const w = normalizeWizard(input)
   const startT = ymToIndex(w.start)
@@ -453,42 +494,7 @@ export function buildPlan(input: WizardInput, id = 'plan', name = 'わが家の�
     }
   }
 
-  const h = w.housing
-  const buyT = ymToIndex(h.buyYM)
-  const housing: Plan['housing'] = { rents: [] }
-  if (h.mode === 'rent' || buyT > startT) {
-    housing.rents.push({ id: 'rent', label: '賃貸', from: w.start, to: h.mode === 'buy' ? indexToYm(buyT - 1) : undefined, monthlyRent: h.rent, renewalMonths: 1 })
-  }
-  if (h.mode === 'buy') {
-    const p = defaultPurchase(h.buyYM, 'self')
-    const loanAmount = Math.max(0, h.price - h.downPayment)
-    housing.purchase = {
-      ...p,
-      price: h.price,
-      homeType: h.homeType,
-      landShare: h.homeType === 'condo' ? 0.2 : 0.5,
-      wooden: h.homeType === 'house',
-      isNew: h.isNew,
-      longLife: h.performance === 'longLife',
-      managementFee: h.homeType === 'condo' ? h.condoFees * 0.45 : 0,
-      repairReserve: h.homeType === 'condo' ? h.condoFees * 0.55 : 0,
-      repairs: h.homeType === 'condo' ? [{ label: '室内リフォーム', everyYears: 20, amount: 2_000_000 }] : p.repairs,
-      loanDeductionLimit: loanDeductionLimit(h.performance, h.isNew, h.childRearing),
-      loanDeductionYears: h.isNew ? 13 : 10,
-      loan:
-        loanAmount > 0
-          ? {
-              amount: loanAmount,
-              years: h.loanYears,
-              rates: [0, 1, 2, 3].map((k) => ({ fromYear: 1 + k * 5, rate: h.initialRate + k * h.rateRiseEvery5y })),
-              prepayments: [],
-              payoffAge: h.payoffAge > 0 ? h.payoffAge : undefined,
-              fiveYearRule: !!h.fiveYearRule && h.rateRiseEvery5y > 0,
-              borrowerId: 'self',
-            }
-          : undefined,
-    }
-  }
+  const housing = buildHousing(w.housing, w.start)
 
   const accounts: Account[] = adults.flatMap(([id, a]) => accountsFor(id, a, w))
   if (w.taxableBalance > 0) {
