@@ -30,7 +30,9 @@ function rateForYear(loan: Loan, year: number): number {
 
 /**
  * Repayment schedule. Repayment starts the month after `startT`.
- * The monthly payment is recalculated when the rate changes (no 5-year / 125% rule).
+ * By default the monthly payment is recalculated when the rate changes. With `fiveYearRule`,
+ * it is reviewed only every 5 years and rises by at most 25%; interest that the payment does not
+ * cover is added to the balance and settled at the end (未払利息).
  */
 export function loanSchedule(loan: Loan, startT: number, borrowerBirth?: number): LoanMonth[] {
   const rows: LoanMonth[] = []
@@ -48,11 +50,15 @@ export function loanSchedule(loan: Loan, startT: number, borrowerBirth?: number)
     const t = startT + n
     const year = Math.floor((n - 1) / 12) + 1
     const r = rateForYear(loan, year)
-    if (r !== rate) {
+    if (loan.fiveYearRule) {
+      rate = r
+      if (n > 1 && (n - 1) % 60 === 0) payment = Math.min(pmt(rate, remaining, balance), payment * 1.25)
+    } else if (r !== rate) {
       rate = r
       payment = pmt(rate, remaining, balance)
     }
     const interest = balance * (rate / 12)
+    // with the 5-year rule the payment may not cover the interest: the shortfall stays in the balance
     let principal = Math.min(balance, payment - interest)
     if (remaining === 1) principal = balance
     balance -= principal

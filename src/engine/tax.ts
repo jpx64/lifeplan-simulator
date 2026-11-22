@@ -158,12 +158,35 @@ export function retirementIncomeDeduction(years: number): number {
   return y <= 20 ? Math.max(800_000, 400_000 * y) : 8_000_000 + 700_000 * (y - 20)
 }
 
-/** Tax on a retirement lump sum (退職金, iDeCo/DC lump sum). Taxed separately from other income. */
-export function retirementIncomeTax(amount: number, years: number): { incomeTax: number; residentTax: number; taxable: number } {
-  const taxable = floor1000((amount - retirementIncomeDeduction(years)) / 2)
+/** 退職所得控除 without the 800,000 minimum (used for the overlap adjustment between lump sums). */
+export function retirementIncomeDeductionRaw(years: number): number {
+  const y = Math.max(0, Math.ceil(years))
+  return y <= 20 ? 400_000 * y : 8_000_000 + 700_000 * (y - 20)
+}
+
+/** Tax on a retirement lump sum with a given deduction. */
+export function retirementIncomeTaxWithDeduction(amount: number, deduction: number): { incomeTax: number; residentTax: number; taxable: number } {
+  const taxable = floor1000((amount - Math.max(0, deduction)) / 2)
   const incomeTax = Math.floor(incomeTaxBase(taxable) * (1 + RECONSTRUCTION_SURTAX))
   const residentTax = Math.floor(taxable * RESIDENT_TAX_RATE)
   return { incomeTax, residentTax, taxable }
+}
+
+/** Tax on a retirement lump sum (退職金, iDeCo/DC lump sum). Taxed separately from other income. */
+export function retirementIncomeTax(amount: number, years: number): { incomeTax: number; residentTax: number; taxable: number } {
+  return retirementIncomeTaxWithDeduction(amount, retirementIncomeDeduction(years))
+}
+
+/**
+ * How many years back an earlier lump sum makes the deductions overlap (重複期間の調整).
+ * - retirement allowance first, then iDeCo/DC lump sum: 19 years
+ * - iDeCo/DC lump sum first, then retirement allowance: 9 years (from 2026; previously 4)
+ * - otherwise: 4 years
+ */
+export function retirementOverlapWindowYears(earlier: 'allowance' | 'dc', later: 'allowance' | 'dc'): number {
+  if (earlier === 'allowance' && later === 'dc') return 19
+  if (earlier === 'dc' && later === 'allowance') return 9
+  return 4
 }
 
 /**
@@ -273,6 +296,8 @@ export interface SocialInsuranceRates {
   care: number
   pension: number
   employment: number
+  /** 子ども・子育て支援金 (employee share), charged on the health insurance base. */
+  childSupport?: number
 }
 
 const HEALTH_MONTHLY_CAP = 1_390_000
@@ -282,14 +307,14 @@ const HEALTH_BONUS_ANNUAL_CAP = 5_730_000
 
 /** Employee share of social insurance on a monthly salary. */
 export function employeeSocialInsuranceMonthly(salary: number, age: number, r: SocialInsuranceRates): number {
-  const health = Math.min(salary, HEALTH_MONTHLY_CAP) * (r.health + (age >= 40 && age < 65 ? r.care : 0))
+  const health = Math.min(salary, HEALTH_MONTHLY_CAP) * (r.health + (r.childSupport ?? 0) + (age >= 40 && age < 65 ? r.care : 0))
   const pension = age < 70 ? Math.min(salary, PENSION_MONTHLY_CAP) * r.pension : 0
   return health + pension + salary * r.employment
 }
 
 /** Employee share of social insurance on one bonus payment. */
 export function employeeSocialInsuranceBonus(bonus: number, age: number, r: SocialInsuranceRates): number {
-  const health = Math.min(bonus, HEALTH_BONUS_ANNUAL_CAP) * (r.health + (age >= 40 && age < 65 ? r.care : 0))
+  const health = Math.min(bonus, HEALTH_BONUS_ANNUAL_CAP) * (r.health + (r.childSupport ?? 0) + (age >= 40 && age < 65 ? r.care : 0))
   const pension = age < 70 ? Math.min(bonus, PENSION_BONUS_CAP) * r.pension : 0
   return health + pension + bonus * r.employment
 }
@@ -297,10 +322,29 @@ export function employeeSocialInsuranceBonus(bonus: number, age: number, r: Soci
 /** National pension contribution per month (FY2026). */
 export const NATIONAL_PENSION_MONTHLY = 17_920
 
+/** Long-term care insurance premium for people aged 65+ (第1号被保険者), national average ≈ 6,225 yen/month. */
+export const CARE_PREMIUM_65_ANNUAL = 75_000
+
 /**
- * National health insurance (国民健康保険 / 後期高齢者医療) per year, simplified:
- * 10% of (prior-year total income − 430,000) plus a flat 50,000 per person.
+ * National health insurance (国民健康保険) or, from 75, 後期高齢者医療, per person per year (rough national averages).
+ * Income-based part on (prior-year total income − 430,000) plus a flat per-person part.
+ * The flat part is reduced by 70% for low incomes (total income ≤ 430,000).
+ * Care insurance for ages 40-64 is included; from 65 it is charged separately (CARE_PREMIUM_65_ANNUAL).
  */
-export function nationalHealthInsuranceAnnual(priorYearIncome: number): number {
-  return Math.max(0, priorYearIncome - 430_000) * 0.1 + 50_000
+export function nationalHealthInsuranceAnnual(priorYearIncome: number, age = 50): number {
+  const base = Math.max(0, priorYearIncome - 430_000)
+  const [rate, flat] = age >= 75 ? [0.097, 50_000] : age >= 40 && age < 65 ? [0.1, 60_000] : [0.08, 45_000]
+  return base * rate + (priorYearIncome <= 430_000 ? flat * 0.3 : flat)
+}
+
+/**
+ * 子ども・子育て支援金 (from April 2026), employee share of the levy on the health insurance base.
+ * FY2026: 0.23% in total (split between employer and employee). It is planned to rise to about 0.4% by FY2028.
+ */
+export function childSupportLevyEmployeeRate(year: number, month: number): number {
+  const fy = month >= 4 ? year : year - 1
+  if (fy < 2026) return 0
+  if (fy === 2026) return 0.00115
+  if (fy === 2027) return 0.0015
+  return 0.002
 }

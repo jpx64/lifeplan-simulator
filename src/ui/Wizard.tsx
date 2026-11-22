@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { DEFAULT_EDUCATION } from '../engine/defaults'
+import { simulate } from '../engine/simulate'
 import type { EducationPlan } from '../engine/types'
-import type { WizardAdult, WizardInput } from '../engine/wizard'
+import { buildPlan, normalizeWizard, type WizardAdult, type WizardInput, type WorkStyle } from '../engine/wizard'
 import { CheckField, ManField, MonthField, NumField, PercentField, SelectField, TextField } from './fields'
+import { man } from './format'
 
 const STEPS = ['家族', '働き方', '住まい', 'いまの資産', '毎月の支出', '老後'] as const
 
@@ -14,12 +16,21 @@ interface Props {
 }
 
 export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
-  const [w, setW] = useState<WizardInput>(initial)
+  const [w, setW] = useState<WizardInput>(() => normalizeWizard(initial))
   const [step, setStep] = useState(0)
   const set = <K extends keyof WizardInput>(k: K, v: WizardInput[K]) => setW((x) => ({ ...x, [k]: v }))
   const setAdult = (who: 'self' | 'spouse', patch: Partial<WizardAdult>) => setW((x) => ({ ...x, [who]: { ...x[who], ...patch } }))
   const setHousing = (patch: Partial<WizardInput['housing']>) => setW((x) => ({ ...x, housing: { ...x.housing, ...patch } }))
   const adults: ('self' | 'spouse')[] = w.hasSpouse ? ['self', 'spouse'] : ['self']
+  // live pension estimate on the last step
+  const pensionPreview = useMemo(() => {
+    if (step !== 5) return undefined
+    try {
+      return simulate(buildPlan(w)).pensions
+    } catch {
+      return undefined
+    }
+  }, [w, step])
 
   return (
     <div className="wizard">
@@ -89,17 +100,30 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
           <>
             <h2>働き方</h2>
             <p className="lead">
-              年収は<strong>額面（税・社会保険料を引く前）</strong>で入力します。手取りや税金は自動で計算します。会社員を前提にしています。
+              年収は<strong>額面（税・社会保険料を引く前）</strong>で入力します。手取り・税金・社会保険料は自動で計算します。
             </p>
             {adults.map((who) => {
               const a = w[who]
+              const style = a.workStyle ?? 'employee'
+              const futureChild = w.children.some((c) => c.birth >= w.start)
               return (
                 <div className="subcard" key={who}>
                   <div className="subcard-head">
                     <strong>{a.name}</strong>
                   </div>
-                  <CheckField label="会社員として働いている" checked={a.working} onChange={(v) => setAdult(who, { working: v })} />
-                  {a.working && (
+                  <div className="grid">
+                    <SelectField<WorkStyle>
+                      label="いまの働き方"
+                      value={style}
+                      options={[
+                        { value: 'employee', label: '会社員（厚生年金に加入）' },
+                        { value: 'parttime', label: 'パート・アルバイト' },
+                        { value: 'none', label: '働いていない' },
+                      ]}
+                      onChange={(v) => setAdult(who, { workStyle: v, working: v !== 'none' })}
+                    />
+                  </div>
+                  {style === 'employee' && (
                     <>
                       <div className="grid">
                         <ManField label="額面年収（賞与込み）" value={a.annualIncome} onChange={(v) => setAdult(who, { annualIncome: v })} step={10} />
@@ -115,29 +139,69 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
                           <NumField label="何歳まで働くか" value={a.reemployUntilAge} onChange={(v) => setAdult(who, { reemployUntilAge: v })} suffix="歳" />
                         </div>
                       )}
-                      {w.children.some((c) => c.birth >= w.start) && (
+                      {futureChild && (
                         <>
-                          <h4>これから生まれる子の育休・時短</h4>
-                          <div className="grid">
-                            <NumField
-                              label="育休の長さ"
-                              value={a.leaveMonths}
-                              onChange={(v) => setAdult(who, { leaveMonths: v })}
-                              suffix="か月"
-                              hint="育児休業給付金（最初の6か月は67%、その後は50%）を自動で計算します"
-                            />
-                            <PercentField
-                              label="時短勤務中の給与"
-                              value={a.shortTimeRatio}
-                              onChange={(v) => setAdult(who, { shortTimeRatio: v })}
-                              step={5}
-                              hint="100%なら時短なし"
-                            />
-                            <NumField label="時短は子が何歳になるまで" value={a.shortTimeUntilChildAge} onChange={(v) => setAdult(who, { shortTimeUntilChildAge: v })} suffix="歳" />
-                          </div>
+                          <h4>これから生まれる子のとき</h4>
+                          <CheckField
+                            label="出産する（産前産後休業を取る）"
+                            checked={!!a.givesBirth}
+                            onChange={(v) => setAdult(who, { givesBirth: v })}
+                            hint="出産の前月から約3か月、出産手当金（給与の2/3）を受け取ります"
+                          />
+                          <SelectField
+                            label="出産・育休のあと"
+                            value={a.afterLeave ?? 'return'}
+                            options={[
+                              { value: 'return', label: '同じ会社に復職する' },
+                              { value: 'quit', label: '退職する（あとでパートなどで働く）' },
+                            ]}
+                            onChange={(v) => setAdult(who, { afterLeave: v })}
+                          />
+                          {(a.afterLeave ?? 'return') === 'return' ? (
+                            <div className="grid">
+                              <NumField
+                                label="育休の長さ（出産から）"
+                                value={a.leaveMonths}
+                                onChange={(v) => setAdult(who, { leaveMonths: v })}
+                                suffix="か月"
+                                hint="育児休業給付金（最初の6か月は67%、その後は50%）を自動で計算します"
+                              />
+                              <PercentField
+                                label="時短勤務中の給与"
+                                value={a.shortTimeRatio}
+                                onChange={(v) => setAdult(who, { shortTimeRatio: v })}
+                                step={5}
+                                hint="100%なら時短なし。2歳になるまでは育児時短就業給付（10%）を受け取ります"
+                              />
+                              <NumField label="時短は子が何歳になるまで" value={a.shortTimeUntilChildAge} onChange={(v) => setAdult(who, { shortTimeUntilChildAge: v })} suffix="歳" />
+                            </div>
+                          ) : (
+                            <div className="grid">
+                              <NumField
+                                label="再び働き始めるのは子が何歳のとき"
+                                value={a.returnChildAge ?? 6}
+                                onChange={(v) => setAdult(who, { returnChildAge: v })}
+                                suffix="歳"
+                                hint="0なら働かない"
+                              />
+                              <ManField label="そのときの年収（パートなど）" value={a.returnIncome ?? 1_000_000} onChange={(v) => setAdult(who, { returnIncome: v })} step={10} hint="130万円未満なら配偶者の扶養に入ります" />
+                            </div>
+                          )}
                         </>
                       )}
                     </>
+                  )}
+                  {style === 'parttime' && (
+                    <div className="grid">
+                      <ManField label="年収（額面）" value={a.partTimeIncome ?? 1_000_000} onChange={(v) => setAdult(who, { partTimeIncome: v })} step={10} />
+                      <CheckField
+                        label="勤務先の社会保険に入っている"
+                        checked={!!a.partTimeSocialInsurance}
+                        onChange={(v) => setAdult(who, { partTimeSocialInsurance: v })}
+                        hint="入っていない場合、年収130万円未満なら会社員の配偶者の扶養、それ以上なら国民健康保険・国民年金"
+                      />
+                      <NumField label="何歳まで働くか" value={a.retireAge} onChange={(v) => setAdult(who, { retireAge: v })} suffix="歳" />
+                    </div>
                   )}
                 </div>
               )
@@ -215,6 +279,14 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
                     hint="変動金利の上昇を見込む場合。固定金利なら0%"
                   />
                   <NumField label="残りを一括返済する年齢（本人）" value={w.housing.payoffAge} onChange={(v) => setHousing({ payoffAge: v })} suffix="歳" hint="0なら一括返済しない" />
+                  {w.housing.rateRiseEvery5y > 0 && (
+                    <CheckField
+                      label="変動金利の5年ルール・125%ルールあり"
+                      checked={!!w.housing.fiveYearRule}
+                      onChange={(v) => setHousing({ fiveYearRule: v })}
+                      hint="返済額は5年ごとにしか変わらず、上がっても1.25倍まで。払いきれない利息は最後に精算します"
+                    />
+                  )}
                 </div>
                 <p className="note">
                   固定資産税・都市計画税は物件価格から自動で概算します。諸費用（物件価格の7%）、火災・地震保険、修繕費も自動で入ります。あとから「詳細設定」で変更できます。
@@ -283,35 +355,102 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
         {step === 5 && (
           <>
             <h2>老後</h2>
+            <h3>公的年金</h3>
+            <p className="note">
+              「自動で概算」では、これまでの平均年収と、このシミュレーションで計算する将来の給与から、老齢基礎年金と老齢厚生年金を計算します。ねんきん定期便の金額がわかる場合は「手入力」も選べます。
+            </p>
             {adults.map((who) => {
               const a = w[who]
+              const est = pensionPreview?.[who]
+              const employee = (a.workStyle ?? 'employee') === 'employee'
               return (
-                <div className="grid" key={who}>
-                  <ManField
-                    label={`${a.name}の公的年金（65歳時点の年額）`}
-                    value={a.pensionAt65}
-                    onChange={(v) => setAdult(who, { pensionAt65: v })}
-                    step={1}
-                    hint="ねんきん定期便の見込み額を入力。目安: 会社員の厚生年金＋基礎年金で150〜200万円"
-                  />
-                  <NumField
-                    label={`${a.name}の受給開始年齢`}
-                    value={a.pensionStartAge}
-                    onChange={(v) => setAdult(who, { pensionStartAge: v })}
-                    suffix="歳"
-                    min={60}
-                    max={75}
-                    hint="繰上げは1か月あたり0.4%減、繰下げは0.7%増"
-                  />
+                <div className="subcard" key={who}>
+                  <div className="subcard-head">
+                    <strong>{a.name}</strong>
+                  </div>
+                  <div className="grid">
+                    <SelectField
+                      label="年金額の決め方"
+                      value={a.pensionMode ?? 'auto'}
+                      options={[
+                        { value: 'auto', label: '自動で概算（おすすめ）' },
+                        { value: 'manual', label: 'ねんきん定期便の額を手入力' },
+                      ]}
+                      onChange={(v) => setAdult(who, { pensionMode: v })}
+                    />
+                    {(a.pensionMode ?? 'auto') === 'auto' ? (
+                      <>
+                        {employee ? (
+                          <NumField label="会社員として働き始めた年齢" value={a.careerStartAge ?? 22} onChange={(v) => setAdult(who, { careerStartAge: v })} suffix="歳" />
+                        ) : (
+                          <NumField label="これまでに会社員だった年数" value={a.pastKoseiYears ?? 0} onChange={(v) => setAdult(who, { pastKoseiYears: v })} suffix="年" />
+                        )}
+                        <ManField
+                          label="会社員だった間の平均年収（額面）"
+                          value={a.pastAverageIncome ?? 0}
+                          onChange={(v) => setAdult(who, { pastAverageIncome: v })}
+                          step={10}
+                          hint="いまの物価でざっくりと。賞与込み"
+                        />
+                      </>
+                    ) : (
+                      <ManField
+                        label="65歳からの年金額（年額）"
+                        value={a.pensionAt65}
+                        onChange={(v) => setAdult(who, { pensionAt65: v })}
+                        step={1}
+                        hint="ねんきん定期便の見込み額（老齢基礎年金＋老齢厚生年金）"
+                      />
+                    )}
+                    <NumField
+                      label="受給開始年齢"
+                      value={a.pensionStartAge}
+                      onChange={(v) => setAdult(who, { pensionStartAge: v })}
+                      suffix="歳"
+                      min={60}
+                      max={75}
+                      hint="繰上げは1か月あたり0.4%減、繰下げは0.7%増"
+                    />
+                  </div>
+                  {est && (
+                    <p className="pension-estimate">
+                      65歳時点の見込み（いまの価値・年額）: <strong>{man(est.total)}</strong>（老齢基礎年金 {man(est.basic)}＋老齢厚生年金 {man(est.earnings)}、厚生年金の加入 約{Math.round(est.koseiMonths / 12)}年）
+                    </p>
+                  )}
                 </div>
               )
             })}
+            <h3>老後の暮らしと資産の取り崩し</h3>
             <div className="grid">
               <PercentField label="退職後の生活費（現役時代に対して）" value={w.retirementLivingRatio} onChange={(v) => set('retirementLivingRatio', v)} step={5} />
-              <ManField label="生活防衛資金（預金の下限）" value={w.cashFloor} onChange={(v) => set('cashFloor', v)} step={10} hint="預金がこれを下回ったら、特定口座→NISAの順に売って補います" />
-              <NumField label="NISAなどの計画的な取り崩しを始める年齢" value={w.withdrawStartAge} onChange={(v) => set('withdrawStartAge', v)} suffix="歳" />
-              <PercentField label="毎年取り崩す割合" value={w.withdrawRate} onChange={(v) => set('withdrawRate', v)} />
+              <ManField label="生活防衛資金（預金の下限）" value={w.cashFloor} onChange={(v) => set('cashFloor', v)} step={10} hint="預金がこれを下回る月は積立を止め、特定口座→NISAの順に売って補います" />
+              <SelectField
+                label="NISAなどの取り崩し方"
+                value={w.withdrawMode ?? 'needed'}
+                options={[
+                  { value: 'needed', label: '預金が足りなくなったときだけ売る' },
+                  { value: 'rate', label: '決まった年齢から毎年一定の割合を売る' },
+                ]}
+                onChange={(v) => set('withdrawMode', v)}
+              />
+              {w.withdrawMode === 'rate' && (
+                <>
+                  <NumField label="取り崩しを始める年齢" value={w.withdrawStartAge} onChange={(v) => set('withdrawStartAge', v)} suffix="歳" />
+                  <PercentField label="毎年取り崩す割合" value={w.withdrawRate} onChange={(v) => set('withdrawRate', v)} />
+                </>
+              )}
             </div>
+            <CheckField
+              label="預金が多すぎるときは、超えた分を毎月NISAに回す"
+              checked={!!w.sweep}
+              onChange={(v) => set('sweep', v)}
+              hint="NISAの枠を超えた分は特定口座（課税）に回します"
+            />
+            {w.sweep && (
+              <div className="grid">
+                <ManField label="預金の上限" value={w.cashCeiling ?? 10_000_000} onChange={(v) => set('cashCeiling', v)} step={50} />
+              </div>
+            )}
           </>
         )}
       </section>

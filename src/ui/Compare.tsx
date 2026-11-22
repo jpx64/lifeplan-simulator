@@ -5,17 +5,18 @@ import type { Plan } from '../engine/types'
 import { CompareChart } from './Charts'
 import { man } from './format'
 
-export function Compare({ plans }: { plans: Plan[] }) {
+export function Compare({ plans, real }: { plans: Plan[]; real: boolean }) {
   const [selected, setSelected] = useState<string[]>(() => plans.slice(0, 3).map((p) => p.id))
+  const [field, setField] = useState<'totalAssets' | 'liquidAssets'>('totalAssets')
   const data = useMemo(
     () =>
       plans
         .filter((p) => selected.includes(p.id))
         .map((p) => {
           const res = simulate(p)
-          return { plan: p, years: yearly(res), k: kpis(p, res, p.retirementAge), selfId: p.members.find((m) => m.role === 'self')!.id }
+          return { plan: p, years: yearly(res, real), k: kpis(p, res, p.retirementAge, real), selfId: p.members.find((m) => m.role === 'self')!.id, pensions: res.pensions }
         }),
-    [plans, selected],
+    [plans, selected, real],
   )
 
   if (plans.length < 2) {
@@ -35,7 +36,7 @@ export function Compare({ plans }: { plans: Plan[] }) {
     <div className="compare">
       <section className="card">
         <h2>シナリオ比較</h2>
-        <p className="note">比べるプランを選んでください（4つまで）。横軸は本人の年齢です。</p>
+        <p className="note">比べるプランを選んでください（4つまで）。横軸は本人の年齢です。{real ? 'いまの物価に換算しています。' : ''}</p>
         <div className="chips">
           {plans.map((p) => (
             <label key={p.id} className={`chip ${selected.includes(p.id) ? 'on' : ''}`}>
@@ -44,7 +45,15 @@ export function Compare({ plans }: { plans: Plan[] }) {
             </label>
           ))}
         </div>
-        <CompareChart series={data.map((d) => ({ name: d.plan.name, years: d.years, selfId: d.selfId }))} />
+        <div className="segmented" role="group" aria-label="グラフの対象">
+          <button type="button" className={field === 'totalAssets' ? 'on' : ''} onClick={() => setField('totalAssets')}>
+            資産合計
+          </button>
+          <button type="button" className={field === 'liquidAssets' ? 'on' : ''} onClick={() => setField('liquidAssets')}>
+            すぐ使える資産（iDeCo などを除く）
+          </button>
+        </div>
+        <CompareChart field={field} series={data.map((d) => ({ name: d.plan.name, years: d.years, selfId: d.selfId }))} />
       </section>
       <section className="card">
         <h2>主な指標</h2>
@@ -87,6 +96,20 @@ export function Compare({ plans }: { plans: Plan[] }) {
                   <td key={d.plan.id} className={d.k.minCash.value < 0 ? 'neg' : ''}>
                     {man(d.k.minCash.value)}（{d.k.minCash.age}歳）
                   </td>
+                ))}
+              </tr>
+              <tr>
+                <th className="text">老後の毎月の収支（平均）</th>
+                {data.map((d) => (
+                  <td key={d.plan.id} className={(d.k.retirementMonthly?.value ?? 0) < 0 ? 'neg' : ''}>
+                    {d.k.retirementMonthly ? man(d.k.retirementMonthly.value, 1) : '—'}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <th className="text">公的年金（世帯・65歳時点の年額）</th>
+                {data.map((d) => (
+                  <td key={d.plan.id}>{man(Object.values(d.pensions).reduce((s, p) => s + p.total, 0))}</td>
                 ))}
               </tr>
               <tr>

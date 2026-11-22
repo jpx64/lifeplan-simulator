@@ -1,29 +1,36 @@
 import { useRef, useState } from 'react'
 import type { Plan } from './engine/types'
 import { buildPlan, defaultWizard } from './engine/wizard'
+import { Assumptions } from './ui/Assumptions'
 import { Compare } from './ui/Compare'
 import { Dashboard } from './ui/Dashboard'
 import { Editor } from './ui/Editor'
+import { Risk } from './ui/Risk'
 import { currentYM } from './ui/format'
 import { downloadJson, newId, usePlans } from './ui/store'
 import { Wizard } from './ui/Wizard'
 import { YearTable } from './ui/YearTable'
 
-type Tab = 'result' | 'table' | 'compare' | 'wizard' | 'edit'
+type Tab = 'result' | 'table' | 'compare' | 'risk' | 'wizard' | 'edit' | 'assumptions'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'result', label: '結果' },
   { id: 'table', label: '年ごとの表' },
   { id: 'compare', label: 'シナリオ比較' },
+  { id: 'risk', label: '万一の備え' },
   { id: 'wizard', label: 'かんたん入力' },
   { id: 'edit', label: '詳細設定' },
+  { id: 'assumptions', label: '計算の前提' },
 ]
+
+const SHOWS_AMOUNTS: Tab[] = ['result', 'table', 'compare', 'risk']
 
 export default function App() {
   const store = usePlans()
   const { plans, active } = store
   const [tab, setTab] = useState<Tab>(store.isFirstVisit ? 'wizard' : 'result')
   const [wizardKey, setWizardKey] = useState(0)
+  const [real, setReal] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const finishWizard = (w: Parameters<typeof buildPlan>[0]) => {
@@ -99,13 +106,25 @@ export default function App() {
         </div>
       </header>
 
-      <nav className="tabs" aria-label="画面">
-        {TABS.map((t) => (
-          <button key={t.id} type="button" className={tab === t.id ? 'on' : ''} aria-current={tab === t.id} onClick={() => { setTab(t.id); window.scrollTo(0, 0) }}>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <div className="tab-bar">
+        <nav className="tabs" aria-label="画面">
+          {TABS.map((t) => (
+            <button key={t.id} type="button" className={tab === t.id ? 'on' : ''} aria-current={tab === t.id} onClick={() => { setTab(t.id); window.scrollTo(0, 0) }}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        {SHOWS_AMOUNTS.includes(tab) && (
+          <div className="segmented" role="group" aria-label="金額の表示">
+            <button type="button" className={!real ? 'on' : ''} onClick={() => setReal(false)} title="インフレを含んだ将来の額面">
+              額面
+            </button>
+            <button type="button" className={real ? 'on' : ''} onClick={() => setReal(true)} title="インフレ分を割り戻した、いまの物価での金額">
+              いまの物価で表示
+            </button>
+          </div>
+        )}
+      </div>
 
       <main>
         {active.id === 'sample' && tab !== 'wizard' && (
@@ -116,9 +135,11 @@ export default function App() {
             </button>
           </div>
         )}
-        {tab === 'result' && <Dashboard key={active.id} plan={active} onApply={store.update} />}
-        {tab === 'table' && <YearTable plan={active} />}
-        {tab === 'compare' && <Compare plans={plans} />}
+        {tab === 'result' && <Dashboard key={active.id} plan={active} onApply={store.update} real={real} />}
+        {tab === 'table' && <YearTable plan={active} real={real} />}
+        {tab === 'compare' && <Compare plans={plans} real={real} />}
+        {tab === 'risk' && <Risk key={active.id} plan={active} real={real} />}
+        {tab === 'assumptions' && <Assumptions />}
         {tab === 'wizard' && (
           <>
             {!active.wizard && active.id !== 'sample' && (

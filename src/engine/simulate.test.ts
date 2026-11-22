@@ -143,10 +143,10 @@ describe('simulate: cash arithmetic', () => {
     expect(rows[0].accounts.n.contribution).toBe(300_000)
     expect(rows[1].accounts.n.contribution).toBe(0) // 700,000 - 300,000 < 500,000
   })
-  it('a person without a job pays national pension and health insurance', () => {
+  it('a person without a job pays national pension and health insurance (flat part reduced 70% for no income)', () => {
     const plan = bare({ work: [] })
     const r = simulate(plan).rows[0]
-    expect(r.deductions.socialInsurance).toBeCloseTo(17_920 + 50_000 / 12, 6)
+    expect(r.deductions.socialInsurance).toBeCloseTo(17_920 + (60_000 * 0.3) / 12, 6)
   })
   it('compound monthly growth matches the annual return', () => {
     const plan = bare({ accounts: [{ id: 'n', kind: 'nisa', ownerId: 'self', label: 'NISA', balance: 1_000_000, annualReturn: 0.05, contributions: [] }] })

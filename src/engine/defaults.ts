@@ -91,8 +91,8 @@ export function samplePlan(): Plan {
       { id: 'w6', memberId: 'spouse', label: 'フルタイムに戻る', kind: 'employed', from: '2033-04', to: '2057-08', monthlySalary: 340_000, annualBonus: 1_000_000, raiseRate: 0.01 },
     ],
     pensions: [
-      { memberId: 'self', startAge: 65, annualAmountAt65: 1_900_000 },
-      { memberId: 'spouse', startAge: 65, annualAmountAt65: 1_500_000 },
+      { memberId: 'self', startAge: 65, mode: 'auto', annualAmountAt65: 1_900_000, careerStartAge: 22, pastAverageIncome: 5_500_000 },
+      { memberId: 'spouse', startAge: 65, mode: 'auto', annualAmountAt65: 1_500_000, careerStartAge: 22, pastAverageIncome: 4_000_000 },
     ],
     retirementAllowances: [{ id: 'r1', memberId: 'self', ym: '2054-04', amount: 15_000_000, yearsOfService: 38 }],
     expenses: [

@@ -2,10 +2,33 @@ import { DEFAULT_EDUCATION, defaultPurchase, defaultSettings } from './defaults'
 import { ageAt, indexToYm, monthAtAge, monthOf, ymToIndex, type YM } from './time'
 import type { Account, EducationPlan, Expense, OneOff, Plan, WorkPeriod } from './types'
 
+export type WorkStyle = 'employee' | 'parttime' | 'none'
+
 export interface WizardAdult {
   name: string
   birth: YM
+  /** Kept for plans saved before `workStyle` existed. */
   working: boolean
+  /** 会社員 (employee) / パート・アルバイト / 働いていない. */
+  workStyle?: WorkStyle
+  /** Part-time: gross annual income and whether the employer's social insurance applies. */
+  partTimeIncome?: number
+  partTimeSocialInsurance?: boolean
+  /** Gives birth to the children born after the start: maternity leave and 出産手当金. */
+  givesBirth?: boolean
+  /** After childcare leave: return to work (時短 → full time) or quit and later work part-time. */
+  afterLeave?: 'return' | 'quit'
+  /** quit: child age at which part-time work starts (0 = do not work again). */
+  returnChildAge?: number
+  /** quit: part-time gross annual income after returning. */
+  returnIncome?: number
+  /** Public pension: estimate automatically from the salary history, or use the ねんきん定期便 amount. */
+  pensionMode?: 'auto' | 'manual'
+  careerStartAge?: number
+  /** Average gross annual income so far (today's money). */
+  pastAverageIncome?: number
+  /** Not an employee now: years worked as an employee (厚生年金) so far. */
+  pastKoseiYears?: number
   /** Gross annual income (額面年収) including bonus. */
   annualIncome: number
   /** Share of the annual income paid as bonus. */
@@ -67,6 +90,8 @@ export interface WizardInput {
     /** Pay off the remaining loan at this self age (0 = no). */
     payoffAge: number
     condoFees: number
+    /** Variable rate: 5-year rule and 125% rule. */
+    fiveYearRule?: boolean
   }
   cash: number
   taxableBalance: number
@@ -85,8 +110,13 @@ export interface WizardInput {
   /** Living costs after the self retirement age, as a share of before. */
   retirementLivingRatio: number
   cashFloor: number
+  /** needed: sell investments only when cash drops below the floor. rate: withdraw a fixed share every year. */
+  withdrawMode?: 'needed' | 'rate'
   withdrawStartAge: number
   withdrawRate: number
+  /** Move cash above `cashCeiling` into NISA every month. */
+  sweep?: boolean
+  cashCeiling?: number
   investReturn: number
   inflationRate: number
 }
@@ -96,6 +126,17 @@ function adult(name: string, birth: YM, start: YM): WizardAdult {
     name,
     birth,
     working: true,
+    workStyle: 'employee',
+    partTimeIncome: 1_000_000,
+    partTimeSocialInsurance: false,
+    givesBirth: false,
+    afterLeave: 'return',
+    returnChildAge: 6,
+    returnIncome: 1_000_000,
+    pensionMode: 'auto',
+    careerStartAge: 22,
+    pastAverageIncome: 4_000_000,
+    pastKoseiYears: 8,
     annualIncome: 5_000_000,
     bonusShare: 0.2,
     raiseRate: 0.01,
@@ -128,7 +169,15 @@ export function defaultWizard(start: YM): WizardInput {
     endAge: 100,
     self: adult('本人', `${y - 35}-04`, start),
     hasSpouse: true,
-    spouse: { ...adult('配偶者', `${y - 33}-07`, start), annualIncome: 4_000_000, leaveMonths: 12, shortTimeRatio: 0.8, shortTimeUntilChildAge: 3 },
+    spouse: {
+      ...adult('配偶者', `${y - 33}-07`, start),
+      annualIncome: 4_000_000,
+      pastAverageIncome: 3_500_000,
+      givesBirth: true,
+      leaveMonths: 12,
+      shortTimeRatio: 0.8,
+      shortTimeUntilChildAge: 3,
+    },
     children: [{ name: '子1', birth: indexToYm(ymToIndex(start) + 6), education: { ...DEFAULT_EDUCATION } }],
     housing: {
       mode: 'rent',
@@ -145,6 +194,7 @@ export function defaultWizard(start: YM): WizardInput {
       rateRiseEvery5y: 0.0025,
       payoffAge: 0,
       condoFees: 30_000,
+      fiveYearRule: false,
     },
     cash: 3_000_000,
     taxableBalance: 0,
@@ -161,11 +211,27 @@ export function defaultWizard(start: YM): WizardInput {
     carUntilAge: 75,
     retirementLivingRatio: 0.8,
     cashFloor: 2_000_000,
+    withdrawMode: 'needed',
     withdrawStartAge: 65,
     withdrawRate: 0.04,
+    sweep: false,
+    cashCeiling: 10_000_000,
     investReturn: 0.04,
     inflationRate: 0.0125,
   }
+}
+
+/** Fill in fields added after a plan was saved, so older wizard answers keep working. */
+export function normalizeWizard(w: WizardInput): WizardInput {
+  const d = defaultWizard(w.start)
+  const fix = (a: WizardAdult, da: WizardAdult): WizardAdult => ({
+    ...da,
+    ...a,
+    workStyle: a.workStyle ?? (a.working ? 'employee' : 'none'),
+    // plans saved before pensions were estimated automatically used the manual amount
+    pensionMode: a.pensionMode ?? 'manual',
+  })
+  return { ...d, ...w, self: fix(w.self, d.self), spouse: fix(w.spouse, d.spouse), housing: { ...d.housing, ...w.housing } }
 }
 
 /** Limits of the housing loan deduction (move-in 2024-2025, new homes). */
@@ -184,50 +250,92 @@ function updatesBetween(startT: number, t: number) {
   return n
 }
 
-type WorkState = { kind: 'employed' | 'parentalLeave'; ratio: number; label: string }
+type WorkState = { kind: 'employed' | 'parentalLeave' | 'none' | 'parttime'; ratio: number; label: string; maternity?: boolean }
 
 function workPeriods(id: string, a: WizardAdult, startT: number, childBirths: number[]): WorkPeriod[] {
-  if (!a.working) return []
+  const style = a.workStyle ?? (a.working ? 'employee' : 'none')
+  if (style === 'none') return []
   const birth = ymToIndex(a.birth)
   const retireT = monthAtAge(birth, a.retireAge)
+  const partTime = (from: number, to: number, income: number, insured: boolean, label: string): WorkPeriod => ({
+    id: `${id}-p${from}`,
+    memberId: id,
+    label,
+    kind: 'employed',
+    from: indexToYm(from),
+    to: indexToYm(to),
+    monthlySalary: income / 12,
+    annualBonus: 0,
+    raiseRate: 0,
+    socialInsurance: insured,
+  })
+  if (style === 'parttime') {
+    return retireT > startT ? [partTime(startT, retireT - 1, a.partTimeIncome ?? 1_000_000, !!a.partTimeSocialInsurance, 'パート・アルバイト')] : []
+  }
+
   const futureBirths = childBirths.filter((b) => b >= startT).sort((x, y) => x - y)
+  const quitBirth = a.afterLeave === 'quit' ? futureBirths[0] : undefined
+  const leaveStart = (b: number) => (a.givesBirth ? b - 1 : b)
+  // with a birth, the leave covers at least the postnatal 8 weeks
+  const leaveEnd = (b: number) => b + Math.max(a.leaveMonths, a.givesBirth ? 2 : 0) - 1
   const stateAt = (t: number): WorkState => {
-    for (const b of futureBirths) {
-      if (a.leaveMonths > 0 && t >= b && t < b + a.leaveMonths) return { kind: 'parentalLeave', ratio: 0, label: '育休' }
+    if (quitBirth !== undefined && t >= leaveStart(quitBirth)) {
+      // maternity leave (出産手当金) only, then out of work
+      if (a.givesBirth && t <= quitBirth + 1) return { kind: 'parentalLeave', ratio: 0, label: '産休', maternity: true }
+      return { kind: 'none', ratio: 0, label: '退職' }
     }
     for (const b of futureBirths) {
-      if (a.shortTimeRatio < 1 && t >= b + a.leaveMonths && ageAt(b, t) < a.shortTimeUntilChildAge)
-        return { kind: 'employed', ratio: a.shortTimeRatio, label: '時短勤務' }
+      if ((a.leaveMonths > 0 || a.givesBirth) && t >= leaveStart(b) && t <= leaveEnd(b)) {
+        return { kind: 'parentalLeave', ratio: 0, label: a.givesBirth ? '産休・育休' : '育休', maternity: !!a.givesBirth }
+      }
+    }
+    for (const b of futureBirths) {
+      if (a.shortTimeRatio < 1 && t > leaveEnd(b) && ageAt(b, t) < a.shortTimeUntilChildAge) return { kind: 'employed', ratio: a.shortTimeRatio, label: '時短勤務' }
     }
     return { kind: 'employed', ratio: 1, label: '会社員' }
   }
   const out: WorkPeriod[] = []
   let segStart = startT
   let cur = stateAt(startT)
-  const push = (from: number, to: number, s: WorkState) => {
+  const push = (from: number, to: number, st: WorkState) => {
+    if (st.kind === 'none') return
     const g = Math.pow(1 + a.raiseRate, updatesBetween(startT, from))
+    // 育児時短就業給付: while the child is under 2
+    const child = futureBirths.filter((b) => b <= from).at(-1)
+    const benefitTo = st.label === '時短勤務' && child !== undefined && child + 23 >= from ? indexToYm(Math.min(to, child + 23)) : undefined
     out.push({
       id: `${id}-w${out.length}`,
       memberId: id,
-      label: out.length > 0 && s.label === '会社員' ? '通常勤務に戻る' : s.label,
-      kind: s.kind,
+      label: out.length > 0 && st.label === '会社員' ? '通常勤務に戻る' : st.label,
+      kind: st.kind === 'parttime' ? 'employed' : st.kind,
       from: indexToYm(from),
       to: indexToYm(to),
-      monthlySalary: ((a.annualIncome * (1 - a.bonusShare)) / 12) * g * s.ratio,
-      annualBonus: a.annualIncome * a.bonusShare * g * s.ratio,
+      monthlySalary: ((a.annualIncome * (1 - a.bonusShare)) / 12) * g * st.ratio,
+      annualBonus: a.annualIncome * a.bonusShare * g * st.ratio,
       raiseRate: a.raiseRate,
-      postBirthSupplement: s.kind === 'parentalLeave',
+      postBirthSupplement: st.kind === 'parentalLeave',
+      maternity: st.maternity,
+      shortTimeBenefitTo: benefitTo,
     })
   }
   for (let t = startT + 1; t < retireT; t++) {
-    const s = stateAt(t)
-    if (s.kind !== cur.kind || s.ratio !== cur.ratio) {
+    const st = stateAt(t)
+    if (st.kind !== cur.kind || st.ratio !== cur.ratio || st.label !== cur.label) {
       push(segStart, t - 1, cur)
       segStart = t
-      cur = s
+      cur = st
     }
   }
   if (retireT > startT) push(segStart, retireT - 1, cur)
+
+  if (quitBirth !== undefined) {
+    // part-time work after quitting
+    if ((a.returnChildAge ?? 0) > 0) {
+      const from = Math.max(startT, quitBirth + (a.returnChildAge ?? 6) * 12)
+      if (from < retireT) out.push(partTime(from, retireT - 1, a.returnIncome ?? 1_000_000, false, 'パートで再就職'))
+    }
+    return out
+  }
   if (a.reemploy && a.reemployUntilAge > a.retireAge) {
     out.push({
       id: `${id}-re`,
@@ -258,7 +366,7 @@ function accountsFor(id: string, a: WizardAdult, w: WizardInput): Account[] {
       costBasis: a.nisaCostBasis || a.nisaBalance,
       annualReturn: w.investReturn,
       contributions: a.nisaMonthly > 0 ? [{ from: start, to: until, monthly: a.nisaMonthly }] : [],
-      withdrawal: { startAge: w.withdrawStartAge, mode: 'rate', value: w.withdrawRate },
+      withdrawal: w.withdrawMode === 'rate' ? { startAge: w.withdrawStartAge, mode: 'rate', value: w.withdrawRate } : undefined,
     },
   ]
   if (a.idecoBalance > 0 || a.idecoMonthly > 0) {
@@ -290,12 +398,15 @@ function accountsFor(id: string, a: WizardAdult, w: WizardInput): Account[] {
   return accs
 }
 
-export function buildPlan(w: WizardInput, id = 'plan', name = 'わが家のプラン'): Plan {
+export function buildPlan(input: WizardInput, id = 'plan', name = 'わが家のプラン'): Plan {
+  const w = normalizeWizard(input)
   const startT = ymToIndex(w.start)
   const selfBirth = ymToIndex(w.self.birth)
   const childBirths = w.children.map((c) => ymToIndex(c.birth))
   const adults: [string, WizardAdult][] = [['self', w.self]]
   if (w.hasSpouse) adults.push(['spouse', w.spouse])
+  /** Quits work at the first child born after the start. */
+  const quits = (a: WizardAdult) => a.workStyle === 'employee' && a.afterLeave === 'quit' && childBirths.some((b) => b >= startT)
 
   const members: Plan['members'] = [
     { id: 'self', name: w.self.name, role: 'self', birth: w.self.birth },
@@ -372,6 +483,7 @@ export function buildPlan(w: WizardInput, id = 'plan', name = 'わが家のプ�
               rates: [0, 1, 2, 3].map((k) => ({ fromYear: 1 + k * 5, rate: h.initialRate + k * h.rateRiseEvery5y })),
               prepayments: [],
               payoffAge: h.payoffAge > 0 ? h.payoffAge : undefined,
+              fiveYearRule: !!h.fiveYearRule && h.rateRiseEvery5y > 0,
               borrowerId: 'self',
             }
           : undefined,
@@ -389,7 +501,7 @@ export function buildPlan(w: WizardInput, id = 'plan', name = 'わが家のプ�
       costBasis: w.taxableCostBasis || w.taxableBalance,
       annualReturn: w.investReturn,
       contributions: [],
-      withdrawal: { startAge: w.withdrawStartAge, mode: 'rate', value: w.withdrawRate },
+      withdrawal: w.withdrawMode === 'rate' ? { startAge: w.withdrawStartAge, mode: 'rate', value: w.withdrawRate } : undefined,
     })
   }
 
@@ -399,6 +511,8 @@ export function buildPlan(w: WizardInput, id = 'plan', name = 'わが家のプ�
     cash: w.cash,
     cashFloor: w.cashFloor,
     inflationRate: w.inflationRate,
+    cashCeiling: w.sweep ? w.cashCeiling : undefined,
+    sweepAccountId: w.sweep ? 'self-nisa' : undefined,
     withdrawalOrder: accounts.filter((a) => a.kind === 'taxable').map((a) => a.id).concat(accounts.filter((a) => a.kind === 'nisa').map((a) => a.id)),
   }
 
@@ -408,9 +522,17 @@ export function buildPlan(w: WizardInput, id = 'plan', name = 'わが家のプ�
     settings,
     members,
     work,
-    pensions: adults.map(([mid, a]) => ({ memberId: mid, startAge: a.pensionStartAge, annualAmountAt65: a.pensionAt65 })),
+    pensions: adults.map(([mid, a]) => ({
+      memberId: mid,
+      startAge: a.pensionStartAge,
+      mode: a.pensionMode ?? 'auto',
+      annualAmountAt65: a.pensionAt65,
+      careerStartAge: a.careerStartAge ?? 22,
+      pastAverageIncome: a.pastAverageIncome ?? 0,
+      pastKoseiYears: a.workStyle === 'employee' ? undefined : (a.pastKoseiYears ?? 0),
+    })),
     retirementAllowances: adults
-      .filter(([, a]) => a.working && a.retirementAllowance > 0)
+      .filter(([, a]) => a.workStyle === 'employee' && !quits(a) && a.retirementAllowance > 0)
       .map(([mid, a]) => ({
         id: `ra-${mid}`,
         memberId: mid,

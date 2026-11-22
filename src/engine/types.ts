@@ -48,14 +48,63 @@ export interface WorkPeriod {
   raiseRate: number
   /** Parental leave: also receive the post-birth leave supplement (出生後休業支援給付, +13% for 28 days). */
   postBirthSupplement?: boolean
+  /**
+   * Covered by the employer's social insurance (健康保険・厚生年金). Default true.
+   * Part-time work below the threshold is not covered: the person may be a dependent of the spouse.
+   */
+  socialInsurance?: boolean
+  /** Parental leave that starts with maternity leave (産前産後休業): 出産手当金 for the first 3 months. */
+  maternity?: boolean
+  /** Short working hours for a child under 2: 育児時短就業給付 (10% of the wage) is paid until this month. */
+  shortTimeBenefitTo?: YM
 }
 
 export interface PublicPension {
   memberId: string
   /** Age at which the pension starts (60-75). */
   startAge: number
-  /** Estimated annual amount at age 65 in today's money (from ねんきん定期便). */
+  /**
+   * auto: estimated from the salary history (past average + simulated salaries).
+   * manual: the amount from ねんきん定期便. Default manual.
+   */
+  mode?: 'auto' | 'manual'
+  /** manual: estimated annual amount at age 65 in today's money (from ねんきん定期便). */
   annualAmountAt65: number
+  /** auto: age at which the member joined employees' pension insurance (厚生年金). */
+  careerStartAge?: number
+  /** auto: average gross annual income (incl. bonus) before the simulation start, in today's money. */
+  pastAverageIncome?: number
+  /**
+   * auto: years covered by employees' pension before the start. When omitted, coverage is assumed
+   * from `careerStartAge` until the start (for people who are employees now).
+   */
+  pastKoseiYears?: number
+  /** Months covered by the basic pension between ages 20 and 60 (max 480). Default 480. */
+  basicMonths?: number
+  /** Receive 加給年金 for a younger spouse and young children when eligible. Default true. */
+  spousalAddition?: boolean
+}
+
+/** "What if" scenario: a member dies at `ym`. */
+export interface DeathScenario {
+  memberId: string
+  ym: YM
+  /** Life insurance paid at death. */
+  lifeInsurance: number
+  /** Household spending (expenses other than housing and education) after the death, as a share of before. */
+  livingRatio: number
+  /** The surviving spouse is the wife (affects survivor's pension rules such as 中高齢寡婦加算). */
+  survivorIsWife: boolean
+}
+
+export interface PensionEstimate {
+  /** 老齢基礎年金, annual at 65 in today's money. */
+  basic: number
+  /** 老齢厚生年金 (報酬比例部分), annual at 65 in today's money. */
+  earnings: number
+  /** Months covered by employees' pension (estimated). */
+  koseiMonths: number
+  total: number
 }
 
 export interface RetirementAllowance {
@@ -135,6 +184,13 @@ export interface Loan {
   /** Pay off the remaining balance when the borrower reaches this age. */
   payoffAge?: number
   borrowerId: string
+  /**
+   * Variable-rate loans: the payment is reviewed only every 5 years and can rise
+   * by at most 25% (5年ルール・125%ルール).
+   */
+  fiveYearRule?: boolean
+  /** Group credit life insurance (団信): the loan is paid off if the borrower dies. Default true. */
+  dansin?: boolean
 }
 
 export type HomeType = 'house' | 'condo'
@@ -211,6 +267,8 @@ export interface Account {
   costBasis?: number
   /** Expected annual return. */
   annualReturn: number
+  /** Annual volatility used for Monte Carlo runs. Defaults by kind (e.g. 15% for NISA). */
+  volatility?: number
   contributions: Contribution[]
   /** nisa / taxable / stock: planned withdrawals. */
   withdrawal?: PlannedWithdrawal
@@ -238,6 +296,13 @@ export interface Settings {
   cashFloor: number
   /** Accounts sold (in this order) to refill cash. */
   withdrawalOrder: string[]
+  /** Cash above this level is moved to `sweepAccountId` every month (0 or omitted = off). */
+  cashCeiling?: number
+  sweepAccountId?: string
+  /** Multiplier on public pension amounts (for sensitivity checks). Default 1. */
+  pensionMultiplier?: number
+  /** Multiplier on expenses other than housing and education (for sensitivity checks). Default 1. */
+  expenseMultiplier?: number
   /** Social insurance rates for employees (employee share). */
   healthInsuranceRate: number
   careInsuranceRate: number
@@ -265,6 +330,8 @@ export interface Plan {
   wizard?: import('./wizard').WizardInput
   /** Self retirement age (for the "assets at retirement" indicator). */
   retirementAge?: number
+  /** "What if" death scenario (used by the risk analysis). */
+  death?: DeathScenario
 }
 
 // ---------- results ----------
@@ -320,9 +387,13 @@ export interface MonthRow {
   events: string[]
   /** Cash fell below zero even after selling all accounts. */
   shortfall: boolean
+  /** Price level relative to the start (for showing amounts in today's money). */
+  inflationIndex: number
 }
 
 export interface SimulationResult {
   rows: MonthRow[]
   warnings: string[]
+  /** Public pension estimates per member (today's money, at 65). */
+  pensions: Record<string, PensionEstimate>
 }

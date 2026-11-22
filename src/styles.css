@@ -19,6 +19,10 @@
   --c3: #e0a32e;
   --c4: #8d6bd1;
   --c5: #d9614c;
+  --c6: #3fb3c9;
+  --c7: #c46aa8;
+  --c8: #8a9a3c;
+  --c9: #8a7f72;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(20, 30, 50, 0.06);
   color-scheme: light;
@@ -46,6 +50,10 @@
     --c3: #ecbb57;
     --c4: #a98ce6;
     --c5: #ef7c66;
+    --c6: #5fcfe3;
+    --c7: #dc8ac2;
+    --c8: #b0c25a;
+    --c9: #b3a898;
     --shadow: none;
     color-scheme: dark;
   }
@@ -124,6 +132,7 @@ h4 {
   gap: 8px;
   font-size: 0.9rem;
   color: var(--muted);
+  white-space: nowrap;
 }
 .plan-select select {
   min-width: 200px;
@@ -158,13 +167,22 @@ h4 {
 }
 
 /* ---------- tabs ---------- */
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
 .tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
   overflow-x: auto;
   scrollbar-width: none;
+  min-width: 0;
+  max-width: 100%;
 }
 .tabs button {
   background: none;
@@ -672,6 +690,141 @@ input[type='number'] {
     min-width: 0;
   }
   .kpi-value {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
   }
+  .kpis,
+  .kpis.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .kpi {
+    padding: 10px 12px;
+  }
+  .tab-bar .segmented {
+    margin-top: 0;
+  }
+}
+
+/* ---------- segmented control ---------- */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 4px 0 8px;
+}
+.segmented button {
+  background: var(--surface);
+  color: var(--muted);
+  border: none;
+  border-radius: 0;
+  padding: 6px 12px;
+  font-size: 0.88rem;
+}
+.segmented button + button {
+  border-left: 1px solid var(--border-strong);
+}
+.segmented button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- analysis ---------- */
+.kpis.compact {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+.year-detail h2 small {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-left: 8px;
+}
+.year-detail .events {
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+}
+.breakdowns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.breakdown h3 {
+  margin-top: 0;
+}
+.breakdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+.breakdown th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.breakdown td {
+  text-align: right;
+  padding: 4px 0;
+}
+.breakdown tbody tr {
+  border-bottom: 1px solid var(--grid);
+}
+.breakdown tfoot th,
+.breakdown tfoot td {
+  font-weight: 700;
+  color: var(--text);
+  padding-top: 6px;
+}
+.summary-line {
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.neg {
+  color: var(--bad);
+}
+.pos {
+  color: var(--good);
+}
+.months {
+  margin-top: 12px;
+}
+.months summary {
+  cursor: pointer;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.num-table.clickable tbody tr {
+  cursor: pointer;
+}
+.num-table.clickable tbody tr:hover td,
+.num-table.clickable tbody tr:hover th {
+  background: var(--surface-2);
+}
+.num-table tr.selected td,
+.num-table tr.selected th {
+  background: var(--accent-soft);
+}
+.timeline .when.link {
+  text-align: left;
+  padding: 0;
+  color: var(--accent);
+}
+ul.plain {
+  margin: 0;
+  padding-left: 1.2em;
+}
+ul.plain li {
+  margin: 6px 0;
+}
+.pension-estimate {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-size: 0.9rem;
 }

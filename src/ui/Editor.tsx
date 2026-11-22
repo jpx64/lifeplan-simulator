@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { DEFAULT_EDUCATION, defaultPurchase } from '../engine/defaults'
 import { propertyTaxAnnual } from '../engine/housing'
+import { DEFAULT_VOLATILITY } from '../engine/simulate'
 import type {
   Account,
   AccountKind,
@@ -120,9 +121,25 @@ export function Editor({ plan, onChange }: { plan: Plan; onChange: (p: Plan) => 
                     <ManField label="額面月給" value={w.monthlySalary} onChange={(v) => up({ monthlySalary: v })} step={0.5} />
                     <ManField label="年間賞与（額面）" value={w.annualBonus} onChange={(v) => up({ annualBonus: v })} step={5} hint="6月と12月に半分ずつ" />
                     <PercentField label="昇給率（年）" value={w.raiseRate} onChange={(v) => up({ raiseRate: v })} />
+                    <CheckField
+                      label="勤務先の社会保険（厚生年金・健康保険）に入る"
+                      checked={w.socialInsurance !== false}
+                      onChange={(v) => up({ socialInsurance: v })}
+                      hint="パートで入らない場合、年収130万円未満なら会社員の配偶者の扶養に入ります"
+                    />
+                    <MonthField
+                      label="育児時短就業給付を受ける最後の月"
+                      value={w.shortTimeBenefitTo}
+                      onChange={(v) => up({ shortTimeBenefitTo: v })}
+                      optional
+                      hint="2歳未満の子のための時短勤務中、賃金の10%。空欄なら受けない"
+                    />
                   </>
                 ) : (
-                  <CheckField label="出生後休業支援給付（最初の28日に+13%）" checked={!!w.postBirthSupplement} onChange={(v) => up({ postBirthSupplement: v })} />
+                  <>
+                    <CheckField label="産前産後休業から始まる（最初の3か月は出産手当金）" checked={!!w.maternity} onChange={(v) => up({ maternity: v })} />
+                    <CheckField label="出生後休業支援給付（育休の最初の28日に+13%）" checked={!!w.postBirthSupplement} onChange={(v) => up({ postBirthSupplement: v })} />
+                  </>
                 )}
               </div>
             )}
@@ -134,14 +151,41 @@ export function Editor({ plan, onChange }: { plan: Plan; onChange: (p: Plan) => 
               title="公的年金"
               items={plan.pensions.map((p) => ({ ...p, id: p.memberId }))}
               onChange={(v) => set('pensions', v.map(({ id: _id, ...p }) => p))}
-              create={() => ({ id: 'x', memberId: memberOptions[0].value, startAge: 65, annualAmountAt65: 1_500_000 })}
+              create={() => ({ id: 'x', memberId: memberOptions[0].value, startAge: 65, mode: 'auto' as const, annualAmountAt65: 1_500_000, careerStartAge: 22, pastAverageIncome: 4_000_000 })}
               addLabel="年金を追加"
-              itemTitle={(p) => nameOf(plan, p.memberId)}
+              itemTitle={(p) => `${nameOf(plan, p.memberId)}（${p.mode === 'auto' ? '自動で概算' : `手入力 ${man(p.annualAmountAt65)}`}・${p.startAge}歳から）`}
               render={(p, up) => (
                 <div className="grid">
                   <SelectField label="誰の" value={p.memberId} options={memberOptions} onChange={(v) => up({ memberId: v })} />
-                  <ManField label="65歳時点の年額（いまの価値）" value={p.annualAmountAt65} onChange={(v) => up({ annualAmountAt65: v })} step={1} hint="ねんきん定期便の見込み額" />
+                  <SelectField
+                    label="年金額の決め方"
+                    value={p.mode ?? 'manual'}
+                    options={[
+                      { value: 'auto', label: '給与の履歴から自動で概算' },
+                      { value: 'manual', label: 'ねんきん定期便の額を手入力' },
+                    ]}
+                    onChange={(v) => up({ mode: v })}
+                  />
+                  {p.mode === 'auto' ? (
+                    <>
+                      <NumField label="会社員として働き始めた年齢" value={p.careerStartAge ?? 22} onChange={(v) => up({ careerStartAge: v })} suffix="歳" />
+                      <CheckField
+                        label="開始時点で会社員ではない"
+                        checked={p.pastKoseiYears !== undefined}
+                        onChange={(v) => up({ pastKoseiYears: v ? 0 : undefined })}
+                        hint="オフにすると、働き始めた年齢から開始時点までずっと会社員として計算します"
+                      />
+                      {p.pastKoseiYears !== undefined && (
+                        <NumField label="これまでに会社員だった年数" value={p.pastKoseiYears} onChange={(v) => up({ pastKoseiYears: v })} suffix="年" />
+                      )}
+                      <ManField label="これまでの平均年収（額面・いまの価値）" value={p.pastAverageIncome ?? 0} onChange={(v) => up({ pastAverageIncome: v })} step={10} />
+                      <NumField label="国民年金の加入月数（20〜60歳）" value={p.basicMonths ?? 480} onChange={(v) => up({ basicMonths: v })} suffix="か月" max={480} hint="未納・免除がなければ480" />
+                    </>
+                  ) : (
+                    <ManField label="65歳時点の年額（いまの価値）" value={p.annualAmountAt65} onChange={(v) => up({ annualAmountAt65: v })} step={1} hint="ねんきん定期便の見込み額" />
+                  )}
                   <NumField label="受給開始年齢" value={p.startAge} onChange={(v) => up({ startAge: v })} suffix="歳" min={60} max={75} />
+                  <CheckField label="加給年金を受け取る（条件を満たす場合）" checked={p.spousalAddition !== false} onChange={(v) => up({ spousalAddition: v })} />
                 </div>
               )}
             />
@@ -331,6 +375,8 @@ function SettingsSection({ plan, onChange }: { plan: Plan; onChange: (p: Plan) =
           <PercentField label="インフレ率（年）" value={s.inflationRate} onChange={(v) => up({ inflationRate: v })} step={0.05} />
           <PercentField label="年金額の伸び率（年）" value={s.pensionGrowthRate} onChange={(v) => up({ pensionGrowthRate: v })} step={0.05} hint="マクロ経済スライドで、インフレ率より低くなるのが一般的" />
           <NumField label="インフレ・昇給を反映する月" value={s.annualUpdateMonth} onChange={(v) => up({ annualUpdateMonth: v })} suffix="月" min={1} max={12} />
+          <PercentField label="支出の調整（生活費など）" value={s.expenseMultiplier ?? 1} onChange={(v) => up({ expenseMultiplier: v })} step={5} hint="100%が入力どおり。「もしも」で反映した値もここに入ります" />
+          <PercentField label="公的年金の調整" value={s.pensionMultiplier ?? 1} onChange={(v) => up({ pensionMultiplier: v })} step={5} hint="100%が計算どおり" />
         </div>
       </section>
       <section className="card">
@@ -338,6 +384,15 @@ function SettingsSection({ plan, onChange }: { plan: Plan; onChange: (p: Plan) =
         <div className="grid">
           <ManField label="開始時点の預貯金" value={s.cash} onChange={(v) => up({ cash: v })} step={10} />
           <ManField label="生活防衛資金（預金の下限）" value={s.cashFloor} onChange={(v) => up({ cashFloor: v })} step={10} hint="これを下回る月は積立を止め、下の順に口座を売って補います" />
+          <ManField label="預金の上限" value={s.cashCeiling ?? 0} onChange={(v) => up({ cashCeiling: v > 0 ? v : undefined })} step={50} hint="超えた分を毎月、下の口座に回します。0ならしない" />
+          {(s.cashCeiling ?? 0) > 0 && (
+            <SelectField
+              label="上限を超えた分を回す口座"
+              value={s.sweepAccountId ?? ''}
+              options={[{ value: '', label: '選んでください' }, ...liquid.map((a) => ({ value: a.id, label: a.label }))]}
+              onChange={(v) => up({ sweepAccountId: v || undefined })}
+            />
+          )}
         </div>
         <h3>不足したときに売る順番</h3>
         <ol className="order-list">
@@ -457,6 +512,8 @@ function HousingSection({ plan, onChange, memberOptions }: { plan: Plan; onChang
                   <NumField label="返済期間" value={loan.years} onChange={(v) => upL({ years: v })} suffix="年" />
                   <SelectField label="借りる人（ローン控除を受ける人）" value={loan.borrowerId} options={memberOptions} onChange={(v) => upL({ borrowerId: v })} />
                   <NumField label="残りを一括返済する年齢" value={loan.payoffAge ?? 0} onChange={(v) => upL({ payoffAge: v > 0 ? v : undefined })} suffix="歳" hint="0なら一括返済しない" />
+                  <CheckField label="5年ルール・125%ルール（変動金利）" checked={!!loan.fiveYearRule} onChange={(v) => upL({ fiveYearRule: v })} hint="返済額は5年ごとに見直し、上がっても1.25倍まで" />
+                  <CheckField label="団体信用生命保険（団信）に加入" checked={loan.dansin !== false} onChange={(v) => upL({ dansin: v })} hint="「万一の備え」で、亡くなったときにローンが完済されます" />
                   <ManField label="ローン控除の上限残高" value={p.loanDeductionLimit} onChange={(v) => upP({ loanDeductionLimit: v })} step={500} />
                   <NumField label="ローン控除の期間" value={p.loanDeductionYears} onChange={(v) => upP({ loanDeductionYears: v })} suffix="年" />
                 </div>
@@ -610,6 +667,13 @@ function AccountsSection({ plan, onChange, memberOptions }: { plan: Plan; onChan
               <ManField label="取得額（元本）" value={a.costBasis ?? a.balance} onChange={(v) => up({ costBasis: v })} step={10} hint="未入力なら時価と同じとみなします" />
             )}
             <PercentField label="想定利回り（年）" value={a.annualReturn} onChange={(v) => up({ annualReturn: v })} />
+            <PercentField
+              label="値動きの大きさ（年率の標準偏差）"
+              value={a.volatility ?? DEFAULT_VOLATILITY[a.kind]}
+              onChange={(v) => up({ volatility: v })}
+              step={1}
+              hint="運用リスクの試算に使います。株式の投資信託で15〜20%、債券中心で5%前後"
+            />
             {(a.kind === 'ideco' || a.kind === 'dc') && (
               <>
                 <NumField label="一時金で受け取る年齢" value={a.receiveAge ?? 65} onChange={(v) => up({ receiveAge: v })} suffix="歳" min={60} max={75} />

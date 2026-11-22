@@ -1,30 +1,40 @@
 import { useMemo, useState } from 'react'
-import { simulate } from '../engine/simulate'
+import { accountLabels, simulate } from '../engine/simulate'
 import { kpis, yearly } from '../engine/summary'
 import type { Plan } from '../engine/types'
-import { AssetChart, CashflowChart } from './Charts'
+import { AssetChart, CashflowChart, ExpenseChart } from './Charts'
 import { man, pct, ymLabel } from './format'
+import { MonteCarloPanel } from './MonteCarlo'
+import { YearDetail } from './YearDetail'
 
 interface Adjust {
   returnDelta: number
   inflation: number
   raiseDelta: number
+  expense: number
+  pension: number
 }
 
 /** Apply "what if" adjustments to a copy of the plan. */
 export function adjustPlan(plan: Plan, a: Adjust): Plan {
   return {
     ...plan,
-    settings: { ...plan.settings, inflationRate: a.inflation },
+    settings: {
+      ...plan.settings,
+      inflationRate: a.inflation,
+      expenseMultiplier: (plan.settings.expenseMultiplier ?? 1) * a.expense,
+      pensionMultiplier: (plan.settings.pensionMultiplier ?? 1) * a.pension,
+    },
     accounts: plan.accounts.map((acc) => ({ ...acc, annualReturn: acc.annualReturn + a.returnDelta })),
     work: plan.work.map((w) => ({ ...w, raiseRate: w.raiseRate + a.raiseDelta })),
   }
 }
 
-export function Dashboard({ plan, onApply }: { plan: Plan; onApply: (p: Plan) => void }) {
-  const base: Adjust = { returnDelta: 0, inflation: plan.settings.inflationRate, raiseDelta: 0 }
+export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Plan) => void; real: boolean }) {
+  const base: Adjust = { returnDelta: 0, inflation: plan.settings.inflationRate, raiseDelta: 0, expense: 1, pension: 1 }
   const [adj, setAdj] = useState<Adjust>(base)
-  const adjusted = adj.returnDelta !== 0 || adj.inflation !== base.inflation || adj.raiseDelta !== 0
+  const [selectedYear, setSelectedYear] = useState<number | undefined>()
+  const adjusted = adj.returnDelta !== 0 || adj.inflation !== base.inflation || adj.raiseDelta !== 0 || adj.expense !== 1 || adj.pension !== 1
   const effective = useMemo(() => (adjusted ? adjustPlan(plan, adj) : plan), [plan, adj, adjusted])
 
   const { result, error } = useMemo(() => {
@@ -34,12 +44,15 @@ export function Dashboard({ plan, onApply }: { plan: Plan; onApply: (p: Plan) =>
       return { result: undefined, error: e instanceof Error ? e.message : String(e) }
     }
   }, [effective])
+  const years = useMemo(() => (result ? yearly(result, real) : []), [result, real])
   if (!result) return <div className="card error">計算できませんでした: {error}</div>
 
-  const years = yearly(result)
-  const k = kpis(effective, result, effective.retirementAge)
+  const k = kpis(effective, result, effective.retirementAge, real)
   const selfId = plan.members.find((m) => m.role === 'self')!.id
   const eventYears = years.filter((y) => y.events.length > 0)
+  const selected = years.find((y) => y.year === selectedYear)
+  const labels = accountLabels(effective, result)
+  const adults = plan.members.filter((m) => m.role !== 'child')
 
   return (
     <div className="dashboard">
@@ -59,10 +72,31 @@ export function Dashboard({ plan, onApply }: { plan: Plan; onApply: (p: Plan) =>
           tone={k.firstShortfall ? 'bad' : 'good'}
         />
         {k.assetsAtRetirement && <Kpi label={`定年（${k.assetsAtRetirement.age}歳）時点の資産`} value={man(k.assetsAtRetirement.value)} />}
+        {k.retirementMonthly && (
+          <Kpi
+            label="老後の毎月の収支（平均）"
+            value={`${k.retirementMonthly.value >= 0 ? '+' : ''}${man(k.retirementMonthly.value, 1)}`}
+            sub={`${k.retirementMonthly.fromAge}〜${k.retirementMonthly.toAge}歳。マイナスは資産の取り崩し`}
+            tone={k.retirementMonthly.value < 0 ? undefined : 'good'}
+          />
+        )}
         <Kpi label="資産のピーク" value={man(k.peakAssets.value)} sub={`${k.peakAssets.age}歳（${k.peakAssets.year}年）`} />
-        <Kpi label="預貯金がいちばん少ない時" value={man(k.minCash.value)} sub={`${k.minCash.age}歳（${ymLabel(k.minCash.ym)}）`} />
+        <Kpi label="預貯金がいちばん少ない時" value={man(k.minCash.value)} sub={`${k.minCash.age}歳（${ymLabel(k.minCash.ym)}）`} tone={k.minCash.value < 0 ? 'bad' : undefined} />
         <Kpi label={`${k.finalAssets.age}歳時点の資産`} value={man(k.finalAssets.value)} />
+        {adults.map((m) =>
+          result.pensions[m.id] ? (
+            <Kpi
+              key={m.id}
+              label={`${m.name}の公的年金（65歳時点・年額）`}
+              value={man(result.pensions[m.id].total)}
+              sub={`基礎 ${man(result.pensions[m.id].basic)}＋厚生 ${man(result.pensions[m.id].earnings)}（いまの価値）`}
+            />
+          ) : null,
+        )}
       </div>
+      <p className="note">
+        {real ? 'いまの物価に換算した金額で表示しています。' : '将来の金額はインフレを含んだ額面（名目）です。上の「いまの物価で表示」で換算できます。'}
+      </p>
 
       <section className="card">
         <div className="card-head">
@@ -72,7 +106,14 @@ export function Dashboard({ plan, onApply }: { plan: Plan; onApply: (p: Plan) =>
               <button type="button" className="link" onClick={() => setAdj(base)}>
                 元に戻す
               </button>
-              <button type="button" className="secondary" onClick={() => { onApply(adjustPlan(plan, adj)); setAdj({ ...base, inflation: adj.inflation }) }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  onApply(adjustPlan(plan, adj))
+                  setAdj({ ...base, inflation: adj.inflation })
+                }}
+              >
                 この条件をプランに反映
               </button>
             </div>
@@ -82,30 +123,42 @@ export function Dashboard({ plan, onApply }: { plan: Plan; onApply: (p: Plan) =>
           <Slider label="運用利回り" value={adj.returnDelta} min={-0.04} max={0.04} step={0.005} format={(v) => `${v >= 0 ? '+' : ''}${pct(v)}`} onChange={(v) => setAdj({ ...adj, returnDelta: v })} />
           <Slider label="インフレ率" value={adj.inflation} min={0} max={0.04} step={0.0025} format={(v) => pct(v, 2)} onChange={(v) => setAdj({ ...adj, inflation: v })} />
           <Slider label="昇給率" value={adj.raiseDelta} min={-0.02} max={0.02} step={0.0025} format={(v) => `${v >= 0 ? '+' : ''}${pct(v, 2)}`} onChange={(v) => setAdj({ ...adj, raiseDelta: v })} />
+          <Slider label="生活費などの支出" value={adj.expense} min={0.7} max={1.3} step={0.05} format={(v) => `${v >= 1 ? '+' : ''}${pct(v - 1, 0)}`} onChange={(v) => setAdj({ ...adj, expense: v })} />
+          <Slider label="公的年金の額" value={adj.pension} min={0.6} max={1.2} step={0.05} format={(v) => `${v >= 1 ? '+' : ''}${pct(v - 1, 0)}`} onChange={(v) => setAdj({ ...adj, pension: v })} />
         </div>
         {adjusted && <p className="note">グラフと数値は調整後の条件で表示しています（プランはまだ変わっていません）。</p>}
       </section>
 
       <section className="card">
         <h2>資産の推移</h2>
-        <p className="note">各年の12月末時点。住宅ローン残高は負の値で表示しています。</p>
-        <AssetChart plan={effective} years={years} />
+        <p className="note">各年の12月末時点。住宅ローン残高は負の値で表示しています。グラフをクリックすると、その年の内訳を表示します。</p>
+        <AssetChart plan={effective} years={years} selected={selectedYear} onSelect={setSelectedYear} />
       </section>
+
+      {selected && <YearDetail plan={effective} row={selected} labels={labels} real={real} onClose={() => setSelectedYear(undefined)} />}
 
       <section className="card">
         <h2>毎年の収支</h2>
         <p className="note">手取り収入（税・社会保険料を引いた後）と支出。投資への積立は支出に含めていません。</p>
-        <CashflowChart plan={effective} years={years} />
+        <CashflowChart plan={effective} years={years} onSelect={setSelectedYear} />
       </section>
+
+      <section className="card">
+        <h2>支出の内訳</h2>
+        <p className="note">住居費には住宅ローンの返済・固定資産税・修繕費、教育には保育料・学費を含みます。</p>
+        <ExpenseChart plan={effective} years={years} onSelect={setSelectedYear} />
+      </section>
+
+      <MonteCarloPanel plan={effective} years={years} real={real} />
 
       <section className="card">
         <h2>ライフイベント</h2>
         <ul className="timeline">
           {eventYears.map((y) => (
             <li key={y.year}>
-              <span className="when">
+              <button type="button" className="when link" onClick={() => setSelectedYear(y.year)}>
                 {y.year}年<small>{y.ages[selfId]}歳</small>
-              </span>
+              </button>
               <span className="what">{[...new Set(y.events)].join('、')}</span>
             </li>
           ))}
