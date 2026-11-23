@@ -175,8 +175,6 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
         {adjusted && <p className="note">グラフと数値は調整後の条件で表示しています（プランはまだ変わっていません）。</p>}
       </section>
 
-      <HintsPanel plan={effective} base={k} real={real} />
-
       <section className="card">
         <h2>資産の推移</h2>
         <p className="note">
@@ -217,6 +215,8 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
           ))}
         </ul>
       </section>
+
+      <HintsPanel plan={effective} base={k} real={real} />
     </div>
   )
 }
