@@ -228,6 +228,7 @@ export function Editor({ plan, onChange }: { plan: Plan; onChange: (p: Plan) => 
                     { value: 'insurance', label: '保険' },
                     { value: 'special', label: '特別費' },
                     { value: 'car', label: '車' },
+                    { value: 'care', label: '介護' },
                     { value: 'other', label: 'その他' },
                   ]}
                   onChange={(v) => up({ category: v })}
@@ -645,7 +646,7 @@ function AccountsSection({ plan, onChange, memberOptions }: { plan: Plan; onChan
   return (
     <ListSection<Account>
       title="資産口座"
-      intro="NISAは年360万円・生涯1,800万円（取得額）の枠を自動で確認し、超えた分は課税口座に回します。iDeCo・企業型DCは受取年齢で全額を一時金として受け取り、退職所得として課税します。"
+      intro="NISAは年360万円・生涯1,800万円（取得額）の枠を自動で確認し、超えた分は課税口座に回します。iDeCo・企業型DCは受取年齢から一時金・年金・併用で受け取れます。一時金は退職所得、年金は公的年金と合わせた雑所得として課税します。"
       items={plan.accounts}
       onChange={(v) => onChange({ ...plan, accounts: v })}
       create={() => ({ id: newId(), kind: 'nisa', ownerId: 'self', label: '新しい口座', balance: 0, annualReturn: 0.04, contributions: [] })}
@@ -676,9 +677,43 @@ function AccountsSection({ plan, onChange, memberOptions }: { plan: Plan; onChan
             />
             {(a.kind === 'ideco' || a.kind === 'dc') && (
               <>
-                <NumField label="一時金で受け取る年齢" value={a.receiveAge ?? 65} onChange={(v) => up({ receiveAge: v })} suffix="歳" min={60} max={75} />
+                <NumField label="受け取りを始める年齢" value={a.receiveAge ?? 65} onChange={(v) => up({ receiveAge: v })} suffix="歳" min={60} max={75} />
+                <SelectField
+                  label="受け取り方"
+                  value={a.receiveMode ?? 'lump'}
+                  options={[
+                    { value: 'lump', label: '一時金' },
+                    { value: 'annuity', label: '年金（分割）' },
+                    { value: 'mixed', label: '一時金と年金の併用' },
+                  ]}
+                  onChange={(v) => up({ receiveMode: v })}
+                />
+                {(a.receiveMode ?? 'lump') !== 'lump' && (
+                  <NumField label="年金で受け取る期間" value={a.annuityYears ?? 10} onChange={(v) => up({ annuityYears: Math.min(20, Math.max(5, v)) })} suffix="年" min={5} max={20} />
+                )}
+                {a.receiveMode === 'mixed' && (
+                  <PercentField label="一時金で受け取る割合" value={a.lumpShare ?? 0.5} onChange={(v) => up({ lumpShare: Math.min(1, Math.max(0, v)) })} step={10} />
+                )}
                 <MonthField label="加入年月" value={a.joined} onChange={(v) => up({ joined: v })} hint="退職所得控除の年数に使います" optional />
+                {a.kind === 'dc' && (
+                  <ManField
+                    label="マッチング拠出（自分の掛金・月）"
+                    value={a.matchingMonthly ?? 0}
+                    onChange={(v) => up({ matchingMonthly: v || undefined })}
+                    step={0.1}
+                    hint="会社掛金がある月だけ、給与から拠出します。所得控除になります"
+                  />
+                )}
               </>
+            )}
+            {a.kind === 'stock' && (
+              <PercentField
+                label="持株会の奨励金（拠出額に対して）"
+                value={a.incentiveRate ?? 0}
+                onChange={(v) => up({ incentiveRate: v || undefined })}
+                step={1}
+                hint="会社員として働いている間、積立に上乗せされます。給与として課税されます"
+              />
             )}
             {a.kind === 'annuity' && (
               <>

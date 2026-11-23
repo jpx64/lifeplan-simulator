@@ -122,6 +122,7 @@ export type ExpenseCategory =
   | 'insurance'
   | 'special'
   | 'car'
+  | 'care'
   | 'other'
 
 export type InsuranceDeductionType = 'none' | 'general' | 'medical' | 'privatePension' | 'earthquake'
@@ -272,8 +273,27 @@ export interface Account {
   contributions: Contribution[]
   /** nisa / taxable / stock: planned withdrawals. */
   withdrawal?: PlannedWithdrawal
-  /** ideco / dc: age at which the whole balance is received as a lump sum. */
+  /** ideco / dc: age at which receiving starts (the whole balance, or the first payment). */
   receiveAge?: number
+  /**
+   * ideco / dc: lump sum (taxed as retirement income), annuity (taxed with public pensions,
+   * 公的年金等の雑所得) or both. Default lump.
+   */
+  receiveMode?: 'lump' | 'annuity' | 'mixed'
+  /** ideco / dc annuity: number of years the payments last (5-20). Default 10. */
+  annuityYears?: number
+  /** ideco / dc mixed: share of the balance received as a lump sum. Default 0.5. */
+  lumpShare?: number
+  /**
+   * dc: the member's own matching contribution per month (マッチング拠出), paid from the salary
+   * while the employer contributes. Deductible like iDeCo.
+   */
+  matchingMonthly?: number
+  /**
+   * stock: employer incentive (持株会奨励金) as a share of the member's contribution. Paid while the
+   * owner is employed; taxed as salary.
+   */
+  incentiveRate?: number
   /** ideco / dc: month the owner joined (years of membership for the retirement deduction). */
   joined?: YM
   /** annuity: owner age at which payouts start and number of years they last. */
@@ -371,6 +391,7 @@ export interface MonthRow {
     insurance: number
     special: number
     car: number
+    care: number
     education: number
     childLiving: number
     housing: number

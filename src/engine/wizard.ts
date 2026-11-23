@@ -56,6 +56,18 @@ export interface WizardAdult {
   dcBalance: number
   dcMonthly: number
   dcJoined: YM
+  /** Own matching contribution to the corporate DC per month (マッチング拠出). */
+  dcMatchingMonthly?: number
+}
+
+/** Care costs: from `startAge` for `years`, a monthly amount plus a one-time cost at the start. */
+export interface CareInput {
+  enabled: boolean
+  /** parent care: self age. own care: each adult's age. */
+  startAge: number
+  years: number
+  monthly: number
+  initial: number
 }
 
 export interface WizardChild {
@@ -119,6 +131,13 @@ export interface WizardInput {
   cashCeiling?: number
   investReturn: number
   inflationRate: number
+  /** How iDeCo and corporate DC are received: lump sum, annuity, or half and half. */
+  dcReceiveMode?: 'lump' | 'annuity' | 'mixed'
+  dcAnnuityYears?: number
+  /** Care of the parents paid by the household. */
+  parentCare?: CareInput
+  /** Care of the adults themselves in old age (each adult). */
+  ownCare?: CareInput
 }
 
 function adult(name: string, birth: YM, start: YM): WizardAdult {
@@ -159,6 +178,7 @@ function adult(name: string, birth: YM, start: YM): WizardAdult {
     dcBalance: 0,
     dcMonthly: 0,
     dcJoined: start,
+    dcMatchingMonthly: 0,
   }
 }
 
@@ -218,6 +238,11 @@ export function defaultWizard(start: YM): WizardInput {
     cashCeiling: 10_000_000,
     investReturn: 0.04,
     inflationRate: 0.0125,
+    dcReceiveMode: 'lump',
+    dcAnnuityYears: 10,
+    // 生命保険文化センター「生命保険に関する全国実態調査」（2024年度）: 月9.0万円、4年7か月、一時費用47.2万円
+    parentCare: { enabled: false, startAge: 55, years: 5, monthly: 30_000, initial: 470_000 },
+    ownCare: { enabled: false, startAge: 85, years: 5, monthly: 90_000, initial: 470_000 },
   }
 }
 
@@ -231,7 +256,15 @@ export function normalizeWizard(w: WizardInput): WizardInput {
     // plans saved before pensions were estimated automatically used the manual amount
     pensionMode: a.pensionMode ?? 'manual',
   })
-  return { ...d, ...w, self: fix(w.self, d.self), spouse: fix(w.spouse, d.spouse), housing: { ...d.housing, ...w.housing } }
+  return {
+    ...d,
+    ...w,
+    self: fix(w.self, d.self),
+    spouse: fix(w.spouse, d.spouse),
+    housing: { ...d.housing, ...w.housing },
+    parentCare: { ...d.parentCare!, ...w.parentCare },
+    ownCare: { ...d.ownCare!, ...w.ownCare },
+  }
 }
 
 /** Limits of the housing loan deduction (move-in 2024-2025, new homes). */
@@ -352,9 +385,15 @@ function workPeriods(id: string, a: WizardAdult, startT: number, childBirths: nu
   return out
 }
 
-function accountsFor(id: string, a: WizardAdult, w: WizardInput): Account[] {
+/**
+ * Accounts of one adult. `quitT`: the month the adult leaves the company (employer DC contributions stop).
+ */
+function accountsFor(id: string, a: WizardAdult, w: WizardInput, quitT?: number): Account[] {
   const start = w.start
   const birth = ymToIndex(a.birth)
+  const receive = { receiveMode: w.dcReceiveMode ?? 'lump', annuityYears: w.dcAnnuityYears ?? 10, lumpShare: 0.5 } as const
+  const dcUntil = Math.min(monthAtAge(birth, a.retireAge), quitT ?? Infinity) - 1
+  const employee = (a.workStyle ?? (a.working ? 'employee' : 'none')) === 'employee'
   const until = indexToYm(monthAtAge(birth, Math.min(65, a.reemploy ? a.reemployUntilAge : a.retireAge)) - 1)
   const accs: Account[] = [
     {
@@ -379,6 +418,7 @@ function accountsFor(id: string, a: WizardAdult, w: WizardInput): Account[] {
       annualReturn: w.investReturn,
       joined: a.idecoJoined,
       receiveAge: 65,
+      ...receive,
       contributions: a.idecoMonthly > 0 ? [{ from: start, to: until, monthly: a.idecoMonthly }] : [],
     })
   }
@@ -392,7 +432,9 @@ function accountsFor(id: string, a: WizardAdult, w: WizardInput): Account[] {
       annualReturn: w.investReturn,
       joined: a.dcJoined,
       receiveAge: Math.max(60, a.retireAge),
-      contributions: a.dcMonthly > 0 && a.working ? [{ from: start, to: indexToYm(monthAtAge(birth, a.retireAge) - 1), monthly: a.dcMonthly }] : [],
+      ...receive,
+      matchingMonthly: a.dcMatchingMonthly || undefined,
+      contributions: a.dcMonthly > 0 && employee && dcUntil >= ymToIndex(start) ? [{ from: start, to: indexToYm(dcUntil), monthly: a.dcMonthly }] : [],
     })
   }
   return accs
@@ -486,6 +528,17 @@ export function buildPlan(input: WizardInput, id = 'plan', name = 'わが家の�
   if (w.specialAnnual) add({ label: '特別費（旅行・家電など）', category: 'special', frequency: 'annual', month: 8, amount: w.specialAnnual, inflate: true })
   const carEnd = monthAtAge(selfBirth, w.carUntilAge) - 1
   if (w.carMonthly) add({ label: '車の維持費', category: 'car', frequency: 'monthly', amount: w.carMonthly, inflate: true, to: indexToYm(carEnd) })
+  const care = (label: string, c: CareInput, birth: number) => {
+    const from = monthAtAge(birth, c.startAge)
+    const to = from + Math.round(c.years * 12) - 1
+    if (to < startT) return
+    if (c.monthly > 0 && c.years > 0) add({ label, category: 'care', frequency: 'monthly', amount: c.monthly, inflate: true, from: indexToYm(Math.max(from, startT)), to: indexToYm(to) })
+    if (c.initial > 0 && from >= startT) {
+      add({ label: `${label}（一時費用）`, category: 'care', frequency: 'annual', month: monthOf(from), amount: c.initial, inflate: true, from: indexToYm(from), to: indexToYm(from) })
+    }
+  }
+  if (w.parentCare?.enabled) care('親の介護費用', w.parentCare, selfBirth)
+  if (w.ownCare?.enabled) for (const [, a] of adults) care(`${a.name}の介護費用`, w.ownCare, ymToIndex(a.birth))
 
   const oneOffs: OneOff[] = []
   if (w.carPrice > 0 && w.carReplaceYears > 0) {
@@ -496,7 +549,9 @@ export function buildPlan(input: WizardInput, id = 'plan', name = 'わが家の�
 
   const housing = buildHousing(w.housing, w.start)
 
-  const accounts: Account[] = adults.flatMap(([id, a]) => accountsFor(id, a, w))
+  const firstBirth = childBirths.filter((b) => b >= startT).sort((x, y) => x - y)[0]
+  const quitT = (a: WizardAdult) => (quits(a) ? firstBirth - (a.givesBirth ? 1 : 0) : undefined)
+  const accounts: Account[] = adults.flatMap(([id, a]) => accountsFor(id, a, w, quitT(a)))
   if (w.taxableBalance > 0) {
     accounts.unshift({
       id: 'self-taxable',

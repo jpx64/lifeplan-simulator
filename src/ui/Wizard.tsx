@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { DEFAULT_EDUCATION } from '../engine/defaults'
 import { simulate } from '../engine/simulate'
 import type { EducationPlan } from '../engine/types'
-import { buildPlan, normalizeWizard, type WizardAdult, type WizardInput, type WorkStyle } from '../engine/wizard'
+import { buildPlan, normalizeWizard, type CareInput, type WizardAdult, type WizardInput, type WorkStyle } from '../engine/wizard'
 import { CheckField, ManField, MonthField, NumField, PercentField, SelectField, TextField } from './fields'
 import { man } from './format'
 
@@ -317,10 +317,19 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
                     <ManField label="NISAの取得額（元本）" value={a.nisaCostBasis} onChange={(v) => setAdult(who, { nisaCostBasis: v })} step={10} hint="生涯の非課税枠（1,800万円）の残りの計算に使います" />
                     <ManField label="NISAの毎月の積立" value={a.nisaMonthly} onChange={(v) => setAdult(who, { nisaMonthly: v })} step={0.5} />
                     <ManField label="iDeCoの残高" value={a.idecoBalance} onChange={(v) => setAdult(who, { idecoBalance: v })} step={10} />
-                    <ManField label="iDeCoの毎月の掛金" value={a.idecoMonthly} onChange={(v) => setAdult(who, { idecoMonthly: v })} step={0.1} hint="65歳で一時金として受け取ります" />
+                    <ManField label="iDeCoの毎月の掛金" value={a.idecoMonthly} onChange={(v) => setAdult(who, { idecoMonthly: v })} step={0.1} hint="65歳から受け取ります（受け取り方は「老後」で選べます）" />
                     <MonthField label="iDeCoの加入年月" value={a.idecoJoined} onChange={(v) => v && setAdult(who, { idecoJoined: v })} />
                     <ManField label="企業型DCの残高" value={a.dcBalance} onChange={(v) => setAdult(who, { dcBalance: v })} step={10} />
                     <ManField label="企業型DCの会社掛金（月）" value={a.dcMonthly} onChange={(v) => setAdult(who, { dcMonthly: v })} step={0.1} />
+                    {a.dcMonthly > 0 && (
+                      <ManField
+                        label="企業型DCのマッチング拠出（自分の掛金・月）"
+                        value={a.dcMatchingMonthly ?? 0}
+                        onChange={(v) => setAdult(who, { dcMatchingMonthly: v })}
+                        step={0.1}
+                        hint="給与から天引きされ、iDeCoと同じく所得控除になります。上限は会社の規約で確認してください"
+                      />
+                    )}
                     <MonthField label="企業型DCの加入年月" value={a.dcJoined} onChange={(v) => v && setAdult(who, { dcJoined: v })} />
                   </div>
                 </div>
@@ -349,6 +358,24 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
               <NumField label="買い替えの間隔" value={w.carReplaceYears} onChange={(v) => set('carReplaceYears', v)} suffix="年" />
               <NumField label="何歳まで車を持つか（本人）" value={w.carUntilAge} onChange={(v) => set('carUntilAge', v)} suffix="歳" />
             </div>
+            <h3>介護</h3>
+            <p className="note">
+              介護にかかった費用の平均は、月9.0万円・期間4年7か月、住宅の改修などの一時費用が47.2万円です（生命保険文化センター「生命保険に関する全国実態調査」2024年度）。
+            </p>
+            <CareFields
+              label="親の介護費用を見込む"
+              ageLabel={`始まる時期（${w.self.name}の年齢）`}
+              monthlyHint="親の年金や貯蓄で賄えない分"
+              value={w.parentCare!}
+              onChange={(v) => set('parentCare', v)}
+            />
+            <CareFields
+              label={w.hasSpouse ? '自分たちの介護費用を見込む（1人ずつ）' : '自分の介護費用を見込む'}
+              ageLabel={w.hasSpouse ? '始まる年齢（それぞれの年齢）' : '始まる年齢'}
+              monthlyHint={w.hasSpouse ? '1人あたり。公的介護保険の自己負担を含む' : '公的介護保険の自己負担を含む'}
+              value={w.ownCare!}
+              onChange={(v) => set('ownCare', v)}
+            />
           </>
         )}
 
@@ -420,6 +447,27 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
                 </div>
               )
             })}
+            {adults.some((who) => w[who].idecoBalance > 0 || w[who].idecoMonthly > 0 || w[who].dcBalance > 0 || w[who].dcMonthly > 0) && (
+              <>
+                <h3>iDeCo・企業型DCの受け取り方</h3>
+                <div className="grid">
+                  <SelectField
+                    label="受け取り方"
+                    value={w.dcReceiveMode ?? 'lump'}
+                    options={[
+                      { value: 'lump', label: '一時金で受け取る' },
+                      { value: 'annuity', label: '年金で受け取る（分割）' },
+                      { value: 'mixed', label: '半分ずつ（一時金と年金の併用）' },
+                    ]}
+                    onChange={(v) => set('dcReceiveMode', v)}
+                    hint="一時金は退職所得（退職金と控除を分け合う）、年金は公的年金と合わせた雑所得として課税されます"
+                  />
+                  {(w.dcReceiveMode ?? 'lump') !== 'lump' && (
+                    <NumField label="年金で受け取る期間" value={w.dcAnnuityYears ?? 10} onChange={(v) => set('dcAnnuityYears', Math.min(20, Math.max(5, v)))} suffix="年" min={5} max={20} />
+                  )}
+                </div>
+              </>
+            )}
             <h3>老後の暮らしと資産の取り崩し</h3>
             <div className="grid">
               <PercentField label="退職後の生活費（現役時代に対して）" value={w.retirementLivingRatio} onChange={(v) => set('retirementLivingRatio', v)} step={5} />
@@ -506,6 +554,24 @@ function EducationFields({ value, onChange }: { value: EducationPlan; onChange: 
         onChange={(v) => set('university', v)}
       />
       {value.university !== 'none' && <CheckField label="大学は下宿（仕送り）" checked={value.livingAway} onChange={(v) => set('livingAway', v)} />}
+    </div>
+  )
+}
+
+function CareFields(props: { label: string; ageLabel: string; monthlyHint: string; value: CareInput; onChange: (v: CareInput) => void }) {
+  const { value: c } = props
+  const set = (patch: Partial<CareInput>) => props.onChange({ ...c, ...patch })
+  return (
+    <div className="subcard">
+      <CheckField label={props.label} checked={c.enabled} onChange={(v) => set({ enabled: v })} />
+      {c.enabled && (
+        <div className="grid">
+          <NumField label={props.ageLabel} value={c.startAge} onChange={(v) => set({ startAge: v })} suffix="歳" min={20} max={110} />
+          <NumField label="期間" value={c.years} onChange={(v) => set({ years: Math.max(0, v) })} suffix="年" min={0} max={30} />
+          <ManField label="費用（月）" value={c.monthly} onChange={(v) => set({ monthly: v })} step={0.5} hint={props.monthlyHint} />
+          <ManField label="一時費用" value={c.initial} onChange={(v) => set({ initial: v })} step={5} hint="住宅の改修・介護用品など。始まる月に払います" />
+        </div>
+      )}
     </div>
   )
 }

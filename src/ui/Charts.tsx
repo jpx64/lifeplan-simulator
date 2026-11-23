@@ -1,16 +1,6 @@
-import {
-  Area,
-  Bar,
-  CartesianGrid,
-  ComposedChart,
-  Legend,
-  Line,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { MonteCarloResult } from '../engine/montecarlo'
 import { EXPENSE_LABELS, type ExpenseKey, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
@@ -32,6 +22,7 @@ const EXPENSE_COLORS: Record<ExpenseKey, string> = {
   insurance: 'var(--c4)',
   special: 'var(--c8)',
   car: 'var(--c9)',
+  care: 'var(--c10)',
   other: 'var(--c5)',
 }
 
@@ -43,12 +34,39 @@ function groupOf(plan: Plan, accountId: string): 'nisa' | 'taxable' | 'pension' 
   return 'pension'
 }
 
-const tooltipStyle = {
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  color: 'var(--text)',
-  fontSize: 13,
+/** Phones and tablets: no mouse to hover with, and a tooltip over the chart hides what it explains. */
+const DOCK_QUERY = '(max-width: 640px), (hover: none)'
+
+function useDockedTips() {
+  const [docked, setDocked] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(DOCK_QUERY).matches)
+  useEffect(() => {
+    const m = matchMedia(DOCK_QUERY)
+    const on = () => setDocked(m.matches)
+    m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [])
+  return docked
+}
+
+type Tip = (body: ReactNode) => ReactNode
+
+/**
+ * A chart and its tooltip. With a mouse the tooltip floats over the chart; on phones it is shown in
+ * a box under the chart instead, so that it never covers the lines it describes.
+ */
+function ChartBox({ height, children, legend }: { height: number; children: (tip: Tip) => ReactElement; legend?: ReactNode }) {
+  const docked = useDockedTips()
+  const [dock, setDock] = useState<HTMLDivElement | null>(null)
+  const tip: Tip = (body) => (docked && dock && body ? createPortal(body, dock) : body)
+  return (
+    <div className="chart-box">
+      <ResponsiveContainer width="100%" height={height}>
+        {children(tip)}
+      </ResponsiveContainer>
+      {legend}
+      {docked && <div ref={setDock} className="tip-dock" data-hint="グラフをタップするか指でなぞると、その時点の内訳をここに表示します" />}
+    </div>
+  )
 }
 
 const axisProps = { tick: { fill: 'var(--muted)', fontSize: 12 } }
@@ -68,6 +86,8 @@ interface TipItem {
   label: string
   value: number
   color?: string
+  /** Shown instead of the amount (e.g. a range). */
+  text?: string
 }
 
 /** Tooltip body: the items, a bold total row, then optional rows outside the total. */
@@ -78,7 +98,7 @@ function ChartTip({ title, items, total, after = [], shares }: { title: string; 
         {it.color && <span className="swatch" style={{ background: it.color }} />}
         {it.label}
       </th>
-      <td className={it.value < 0 ? 'neg' : undefined}>{man(it.value)}</td>
+      <td className={it.value < 0 ? 'neg' : undefined}>{it.text ?? man(it.value)}</td>
       {shares && <td className="share">{share && total && total.value > 0 ? pct(it.value / total.value, 0) : ''}</td>}
     </tr>
   )
@@ -123,37 +143,54 @@ export function AssetChart({ plan, years, selected, onSelect }: { plan: Plan; ye
   type Row = (typeof data)[number]
   const sel = years.find((y) => y.year === selected)
   return (
-    <ResponsiveContainer width="100%" height={340}>
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} onClick={onYearClick(years, onSelect)} style={{ cursor: onSelect ? 'pointer' : undefined }}>
-        <CartesianGrid stroke="var(--grid)" vertical={false} />
-        <XAxis dataKey="label" {...axisProps} minTickGap={40} />
-        <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip
-          content={({ active, payload }) => {
-            const r = payload?.[0]?.payload as Row | undefined
-            if (!active || !r) return null
-            const loan = -r.loan
-            return (
-              <ChartTip
-                title={`${r.year}年（${r.age}歳）12月末`}
-                // listed top-down, in the order the areas are stacked on screen
-                items={[...GROUPS].reverse().map((g) => ({ label: g.label, value: r[g.key], color: g.color })).filter(visible)}
-                total={{ label: '資産合計', value: r.total }}
-                after={loan > 0 ? [{ label: '住宅ローン残高', value: loan, color: 'var(--c5)' }, { label: '差し引き（資産 − ローン）', value: r.total - loan }] : []}
-              />
-            )
-          }}
-        />
-        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder([...GROUPS.map((g) => g.key), 'total', 'loan'])} />
-        <ReferenceLine y={0} stroke="var(--border-strong)" />
-        {sel && <ReferenceLine x={xLabel(selfId)(sel)} stroke="var(--text)" strokeDasharray="4 3" />}
-        {GROUPS.map((g) => (
-          <Area key={g.key} type="monotone" dataKey={g.key} name={g.label} stackId="a" stroke={g.color} fill={g.color} fillOpacity={0.75} />
-        ))}
-        <Line type="monotone" dataKey="total" name="資産合計" stroke="var(--text)" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
-        <Line type="monotone" dataKey="loan" name="住宅ローン残高" stroke="var(--c5)" strokeWidth={2} dot={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
+    <ChartBox height={340}>
+      {(tip) => (
+        <ComposedChart
+          data={data}
+          margin={{ top: 8, right: 8, left: 8, bottom: 0 }}
+          onClick={onYearClick(years, onSelect)}
+          style={{ cursor: onSelect ? 'pointer' : undefined }}
+        >
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="label" {...axisProps} minTickGap={40} />
+          <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
+          <Tooltip
+            content={({ active, payload }) => {
+              const r = payload?.[0]?.payload as Row | undefined
+              if (!active || !r) return null
+              const loan = -r.loan
+              return tip(
+                <ChartTip
+                  title={`${r.year}年（${r.age}歳）12月末`}
+                  // listed top-down, in the order the areas are stacked on screen
+                  items={[...GROUPS]
+                    .reverse()
+                    .map((g) => ({ label: g.label, value: r[g.key], color: g.color }))
+                    .filter(visible)}
+                  total={{ label: '資産合計', value: r.total }}
+                  after={
+                    loan > 0
+                      ? [
+                          { label: '住宅ローン残高', value: loan, color: 'var(--c5)' },
+                          { label: '差し引き（資産 − ローン）', value: r.total - loan },
+                        ]
+                      : []
+                  }
+                />,
+              )
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder([...GROUPS.map((g) => g.key), 'total', 'loan'])} />
+          <ReferenceLine y={0} stroke="var(--border-strong)" />
+          {sel && <ReferenceLine x={xLabel(selfId)(sel)} stroke="var(--text)" strokeDasharray="4 3" />}
+          {GROUPS.map((g) => (
+            <Area key={g.key} type="monotone" dataKey={g.key} name={g.label} stackId="a" stroke={g.color} fill={g.color} fillOpacity={0.75} />
+          ))}
+          <Line type="monotone" dataKey="total" name="資産合計" stroke="var(--text)" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} />
+          <Line type="monotone" dataKey="loan" name="住宅ローン残高" stroke="var(--c5)" strokeWidth={2} dot={false} />
+        </ComposedChart>
+      )}
+    </ChartBox>
   )
 }
 
@@ -161,24 +198,50 @@ export function CashflowChart({ plan, years, onSelect }: { plan: Plan; years: Ye
   const selfId = selfIdOf(plan)
   const data = years.map((y) => ({
     label: xLabel(selfId)(y),
+    year: y.year,
+    age: y.ages[selfId],
     takeHome: y.takeHome,
     expenses: -y.expenses,
     balance: y.balance,
   }))
+  type Row = (typeof data)[number]
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} stackOffset="sign" onClick={onYearClick(years, onSelect)} style={{ cursor: onSelect ? 'pointer' : undefined }}>
-        <CartesianGrid stroke="var(--grid)" vertical={false} />
-        <XAxis dataKey="label" {...axisProps} minTickGap={40} />
-        <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [man(Math.abs(Number(v))), name]} />
-        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(['takeHome', 'expenses', 'balance'])} />
-        <ReferenceLine y={0} stroke="var(--border-strong)" />
-        <Bar dataKey="takeHome" name="手取り収入" fill="var(--c2)" stackId="s" />
-        <Bar dataKey="expenses" name="支出" fill="var(--c5)" stackId="s" />
-        <Line type="monotone" dataKey="balance" name="年間収支" stroke="var(--text)" strokeWidth={1.5} dot={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
+    <ChartBox height={300}>
+      {(tip) => (
+        <ComposedChart
+          data={data}
+          margin={{ top: 8, right: 8, left: 8, bottom: 0 }}
+          stackOffset="sign"
+          onClick={onYearClick(years, onSelect)}
+          style={{ cursor: onSelect ? 'pointer' : undefined }}
+        >
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="label" {...axisProps} minTickGap={40} />
+          <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
+          <Tooltip
+            content={({ active, payload }) => {
+              const r = payload?.[0]?.payload as Row | undefined
+              if (!active || !r) return null
+              return tip(
+                <ChartTip
+                  title={`${r.year}年（${r.age}歳）`}
+                  items={[
+                    { label: '手取り収入', value: r.takeHome, color: 'var(--c2)' },
+                    { label: '支出', value: -r.expenses, color: 'var(--c5)' },
+                  ]}
+                  total={{ label: '年間収支', value: r.balance }}
+                />,
+              )
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(['takeHome', 'expenses', 'balance'])} />
+          <ReferenceLine y={0} stroke="var(--border-strong)" />
+          <Bar dataKey="takeHome" name="手取り収入" fill="var(--c2)" stackId="s" />
+          <Bar dataKey="expenses" name="支出" fill="var(--c5)" stackId="s" />
+          <Line type="monotone" dataKey="balance" name="年間収支" stroke="var(--text)" strokeWidth={1.5} dot={false} />
+        </ComposedChart>
+      )}
+    </ChartBox>
   )
 }
 
@@ -188,32 +251,42 @@ export function ExpenseChart({ plan, years, onSelect }: { plan: Plan; years: Yea
   const data = years.map((y) => ({ label: xLabel(selfId)(y), year: y.year, age: y.ages[selfId], total: y.expenses, ...y.expenseBreakdown }))
   type Row = (typeof data)[number]
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} onClick={onYearClick(years, onSelect)} style={{ cursor: onSelect ? 'pointer' : undefined }}>
-        <CartesianGrid stroke="var(--grid)" vertical={false} />
-        <XAxis dataKey="label" {...axisProps} minTickGap={40} />
-        <YAxis tickFormatter={axisYen} {...axisProps} width={64} />
-        <Tooltip
-          cursor={{ fill: 'var(--grid)' }}
-          content={({ active, payload }) => {
-            const r = payload?.[0]?.payload as Row | undefined
-            if (!active || !r) return null
-            return (
-              <ChartTip
-                title={`${r.year}年（${r.age}歳）`}
-                items={[...keys].reverse().map((k) => ({ label: EXPENSE_LABELS[k], value: r[k], color: EXPENSE_COLORS[k] })).filter(visible)}
-                total={{ label: '支出合計', value: r.total }}
-                shares
-              />
-            )
-          }}
-        />
-        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(keys)} />
-        {keys.map((k) => (
-          <Bar key={k} dataKey={k} name={EXPENSE_LABELS[k]} stackId="e" fill={EXPENSE_COLORS[k]} />
-        ))}
-      </ComposedChart>
-    </ResponsiveContainer>
+    <ChartBox height={300}>
+      {(tip) => (
+        <ComposedChart
+          data={data}
+          margin={{ top: 8, right: 8, left: 8, bottom: 0 }}
+          onClick={onYearClick(years, onSelect)}
+          style={{ cursor: onSelect ? 'pointer' : undefined }}
+        >
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="label" {...axisProps} minTickGap={40} />
+          <YAxis tickFormatter={axisYen} {...axisProps} width={64} />
+          <Tooltip
+            cursor={{ fill: 'var(--grid)' }}
+            content={({ active, payload }) => {
+              const r = payload?.[0]?.payload as Row | undefined
+              if (!active || !r) return null
+              return tip(
+                <ChartTip
+                  title={`${r.year}年（${r.age}歳）`}
+                  items={[...keys]
+                    .reverse()
+                    .map((k) => ({ label: EXPENSE_LABELS[k], value: r[k], color: EXPENSE_COLORS[k] }))
+                    .filter(visible)}
+                  total={{ label: '支出合計', value: r.total }}
+                  shares
+                />,
+              )
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(keys)} />
+          {keys.map((k) => (
+            <Bar key={k} dataKey={k} name={EXPENSE_LABELS[k]} stackId="e" fill={EXPENSE_COLORS[k]} />
+          ))}
+        </ComposedChart>
+      )}
+    </ChartBox>
   )
 }
 
@@ -225,24 +298,43 @@ export function BandChart({ mc, deterministic }: { mc: MonteCarloResult; determi
     median: mc.bands.p50[i],
     base: deterministic?.[i],
   }))
+  type Row = (typeof data)[number]
+  const range = (v: number[]) => `${man(v[0])} 〜 ${man(v[1])}`
   return (
-    <ResponsiveContainer width="100%" height={320}>
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-        <CartesianGrid stroke="var(--grid)" vertical={false} />
-        <XAxis dataKey="label" {...axisProps} minTickGap={40} />
-        <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          formatter={(v, name) => [Array.isArray(v) ? `${man(Number(v[0]))} 〜 ${man(Number(v[1]))}` : man(Number(v)), name]}
-        />
-        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(['outer', 'inner', 'median', 'base'])} />
-        <ReferenceLine y={0} stroke="var(--border-strong)" />
-        <Area type="monotone" dataKey="outer" name="10〜90%の範囲" stroke="none" fill="var(--c1)" fillOpacity={0.18} />
-        <Area type="monotone" dataKey="inner" name="25〜75%の範囲" stroke="none" fill="var(--c1)" fillOpacity={0.35} />
-        <Line type="monotone" dataKey="median" name="中央値" stroke="var(--c1)" strokeWidth={2} dot={false} />
-        {deterministic && <Line type="monotone" dataKey="base" name="利回りが一定の場合" stroke="var(--muted)" strokeDasharray="5 4" strokeWidth={1.5} dot={false} />}
-      </ComposedChart>
-    </ResponsiveContainer>
+    <ChartBox height={320}>
+      {(tip) => (
+        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="label" {...axisProps} minTickGap={40} />
+          <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
+          <Tooltip
+            content={({ active, payload }) => {
+              const r = payload?.[0]?.payload as Row | undefined
+              if (!active || !r) return null
+              return tip(
+                <ChartTip
+                  title={r.label}
+                  items={[
+                    { label: '10〜90%の範囲', value: r.outer[0], text: range(r.outer), color: 'color-mix(in srgb, var(--c1) 30%, transparent)' },
+                    { label: '25〜75%の範囲', value: r.inner[0], text: range(r.inner), color: 'color-mix(in srgb, var(--c1) 55%, transparent)' },
+                    { label: '中央値', value: r.median, color: 'var(--c1)' },
+                    ...(r.base !== undefined ? [{ label: '利回りが一定の場合', value: r.base, color: 'var(--muted)' }] : []),
+                  ]}
+                />,
+              )
+            }}
+          />
+          <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(['outer', 'inner', 'median', 'base'])} />
+          <ReferenceLine y={0} stroke="var(--border-strong)" />
+          <Area type="monotone" dataKey="outer" name="10〜90%の範囲" stroke="none" fill="var(--c1)" fillOpacity={0.18} />
+          <Area type="monotone" dataKey="inner" name="25〜75%の範囲" stroke="none" fill="var(--c1)" fillOpacity={0.35} />
+          <Line type="monotone" dataKey="median" name="中央値" stroke="var(--c1)" strokeWidth={2} dot={false} />
+          {deterministic && (
+            <Line type="monotone" dataKey="base" name="利回りが一定の場合" stroke="var(--muted)" strokeDasharray="5 4" strokeWidth={1.5} dot={false} />
+          )}
+        </ComposedChart>
+      )}
+    </ChartBox>
   )
 }
 
@@ -271,38 +363,52 @@ export function CompareChart({ series, field = 'totalAssets' }: { series: Compar
   })
   const data = [...byAge.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v)
   return (
-    <ResponsiveContainer width="100%" height={340}>
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-        <CartesianGrid stroke="var(--grid)" vertical={false} />
-        <XAxis dataKey="age" {...axisProps} minTickGap={30} />
-        <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip
-          content={({ active, payload }) => {
-            const r = payload?.[0]?.payload as Record<string, number | string> | undefined
-            if (!active || !r) return null
-            const items = series
-              .map((s, i) => ({ label: s.name, value: r[`s${i}`] as number, color: colorOf(s, i) }))
-              .filter((it) => typeof it.value === 'number')
-              .sort((a, b) => b.value - a.value)
-            return <ChartTip title={`本人が${r.age}のとき`} items={items} />
-          }}
-        />
-        <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(series.map((_, i) => `s${i}`))} />
-        <ReferenceLine y={0} stroke="var(--border-strong)" />
-        {series.map((s, i) => (
-          <Line
-            key={i}
-            type="monotone"
-            dataKey={`s${i}`}
-            name={s.name}
-            stroke={colorOf(s, i)}
-            strokeWidth={s.bold ? 3 : 2}
-            strokeDasharray={s.dashed ? '6 4' : undefined}
-            legendType="plainline"
-            dot={false}
+    <ChartBox
+      height={340}
+      // many series: an HTML legend under the chart wraps freely instead of eating into the plot
+      legend={
+        <ul className="chart-legend">
+          {series.map((s, i) => (
+            <li key={i} className={s.bold ? 'bold' : undefined}>
+              <span className={`line-sample ${s.dashed ? 'dashed' : ''}`} style={{ borderColor: colorOf(s, i) }} aria-hidden />
+              {s.name}
+            </li>
+          ))}
+        </ul>
+      }
+    >
+      {(tip) => (
+        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <XAxis dataKey="age" {...axisProps} minTickGap={30} />
+          <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
+          <Tooltip
+            content={({ active, payload }) => {
+              const r = payload?.[0]?.payload as Record<string, number | string> | undefined
+              if (!active || !r) return null
+              const items = series
+                .map((s, i) => ({ label: s.name, value: r[`s${i}`] as number, color: colorOf(s, i) }))
+                .filter((it) => typeof it.value === 'number')
+                .sort((a, b) => b.value - a.value)
+              return tip(<ChartTip title={`本人が${r.age}のとき`} items={items} />)
+            }}
           />
-        ))}
-      </ComposedChart>
-    </ResponsiveContainer>
+          <ReferenceLine y={0} stroke="var(--border-strong)" />
+          {series.map((s, i) => (
+            <Line
+              key={i}
+              type="monotone"
+              dataKey={`s${i}`}
+              name={s.name}
+              stroke={colorOf(s, i)}
+              strokeWidth={s.bold ? 3 : 2}
+              strokeDasharray={s.dashed ? '6 4' : undefined}
+              legendType="plainline"
+              dot={false}
+            />
+          ))}
+        </ComposedChart>
+      )}
+    </ChartBox>
   )
 }

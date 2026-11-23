@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState, type CSSProperties } from 'react'
+import { improvementHints } from '../engine/hints'
 import { accountLabels, simulate } from '../engine/simulate'
-import { kpis, yearly, type YearRow } from '../engine/summary'
+import { kpis, yearly, type Kpis, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
 import { AssetChart, CashflowChart, ExpenseChart } from './Charts'
 import { man, manOku, pct, ymLabel } from './format'
@@ -81,7 +82,12 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
           />
         )}
         <Kpi label="資産のピーク" value={man(k.peakAssets.value)} sub={`${k.peakAssets.age}歳（${k.peakAssets.year}年）`} />
-        <Kpi label="預貯金がいちばん少ない時" value={man(k.minCash.value)} sub={`${k.minCash.age}歳（${ymLabel(k.minCash.ym)}）`} tone={k.minCash.value < 0 ? 'bad' : undefined} />
+        <Kpi
+          label="預貯金がいちばん少ない時"
+          value={man(k.minCash.value)}
+          sub={`${k.minCash.age}歳（${ymLabel(k.minCash.ym)}）`}
+          tone={k.minCash.value < 0 ? 'bad' : undefined}
+        />
         <Kpi label={`${k.finalAssets.age}歳時点の資産`} value={man(k.finalAssets.value)} />
         {adults.map((m) =>
           result.pensions[m.id] ? (
@@ -120,18 +126,62 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
           )}
         </div>
         <div className="sliders">
-          <Slider label="運用利回り" value={adj.returnDelta} min={-0.04} max={0.04} step={0.005} format={(v) => `${v >= 0 ? '+' : ''}${pct(v)}`} onChange={(v) => setAdj({ ...adj, returnDelta: v })} />
-          <Slider label="インフレ率" value={adj.inflation} min={0} max={0.04} step={0.0025} format={(v) => pct(v, 2)} onChange={(v) => setAdj({ ...adj, inflation: v })} />
-          <Slider label="昇給率" value={adj.raiseDelta} min={-0.02} max={0.02} step={0.0025} format={(v) => `${v >= 0 ? '+' : ''}${pct(v, 2)}`} onChange={(v) => setAdj({ ...adj, raiseDelta: v })} />
-          <Slider label="生活費などの支出" value={adj.expense} min={0.7} max={1.3} step={0.05} format={(v) => `${v >= 1 ? '+' : ''}${pct(v - 1, 0)}`} onChange={(v) => setAdj({ ...adj, expense: v })} />
-          <Slider label="公的年金の額" value={adj.pension} min={0.6} max={1.2} step={0.05} format={(v) => `${v >= 1 ? '+' : ''}${pct(v - 1, 0)}`} onChange={(v) => setAdj({ ...adj, pension: v })} />
+          <Slider
+            label="運用利回り"
+            value={adj.returnDelta}
+            min={-0.04}
+            max={0.04}
+            step={0.005}
+            format={(v) => `${v >= 0 ? '+' : ''}${pct(v)}`}
+            onChange={(v) => setAdj({ ...adj, returnDelta: v })}
+          />
+          <Slider
+            label="インフレ率"
+            value={adj.inflation}
+            min={0}
+            max={0.04}
+            step={0.0025}
+            format={(v) => pct(v, 2)}
+            onChange={(v) => setAdj({ ...adj, inflation: v })}
+          />
+          <Slider
+            label="昇給率"
+            value={adj.raiseDelta}
+            min={-0.02}
+            max={0.02}
+            step={0.0025}
+            format={(v) => `${v >= 0 ? '+' : ''}${pct(v, 2)}`}
+            onChange={(v) => setAdj({ ...adj, raiseDelta: v })}
+          />
+          <Slider
+            label="生活費などの支出"
+            value={adj.expense}
+            min={0.7}
+            max={1.3}
+            step={0.05}
+            format={(v) => `${v >= 1 ? '+' : ''}${pct(v - 1, 0)}`}
+            onChange={(v) => setAdj({ ...adj, expense: v })}
+          />
+          <Slider
+            label="公的年金の額"
+            value={adj.pension}
+            min={0.6}
+            max={1.2}
+            step={0.05}
+            format={(v) => `${v >= 1 ? '+' : ''}${pct(v - 1, 0)}`}
+            onChange={(v) => setAdj({ ...adj, pension: v })}
+          />
         </div>
         {adjusted && <p className="note">グラフと数値は調整後の条件で表示しています（プランはまだ変わっていません）。</p>}
       </section>
 
+      <HintsPanel plan={effective} base={k} real={real} />
+
       <section className="card">
         <h2>資産の推移</h2>
-        <p className="note">各年の12月末時点。いちばん上の線が資産合計、住宅ローン残高は負の値で表示しています。カーソルを合わせると合計とローンを差し引いた額、クリックするとその年の内訳を表示します。</p>
+        <p className="note">
+          各年の12月末時点。いちばん上の線が資産合計、住宅ローン残高は負の値で表示しています。カーソルを合わせると合計とローンを差し引いた額、クリックするとその年の内訳を表示します。
+        </p>
         <AssetChart plan={effective} years={years} selected={selectedYear} onSelect={setSelectedYear} />
       </section>
 
@@ -145,7 +195,9 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
 
       <section className="card">
         <h2>支出の内訳</h2>
-        <p className="note">住居費には住宅ローンの返済・固定資産税・修繕費、教育には保育料・学費を含みます。グラフにカーソルを合わせると、その年の合計と割合を表示します。</p>
+        <p className="note">
+          住居費には住宅ローンの返済・固定資産税・修繕費、教育には保育料・学費を含みます。グラフにカーソルを合わせると、その年の合計と割合を表示します。
+        </p>
         <ExpenseStats years={years} real={real} />
         <ExpenseChart plan={effective} years={years} onSelect={setSelectedYear} />
       </section>
@@ -166,6 +218,86 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
         </ul>
       </section>
     </div>
+  )
+}
+
+function Gain({ value, base }: { value?: number; base?: number }) {
+  if (value === undefined || base === undefined) return <span className="muted">—</span>
+  const d = Math.round((value - base) / 10_000)
+  if (d === 0) return <span className="muted">±0</span>
+  return <span className={d > 0 ? 'pos' : 'neg'}>{`${d > 0 ? '+' : '−'}${Math.abs(d).toLocaleString('ja-JP')}万円`}</span>
+}
+
+function ShortfallAge({ age, base }: { age?: number; base?: number }) {
+  const a = age ?? Infinity
+  const b = base ?? Infinity
+  return <span className={a > b ? 'pos' : a < b ? 'neg' : 'muted'}>{age === undefined ? '尽きない' : `${age}歳`}</span>
+}
+
+/** One change at a time, ranked by how much it adds to the final assets. */
+function HintsPanel({ plan, base, real }: { plan: Plan; base: Kpis; real: boolean }) {
+  // the hints run several simulations: let the sliders above stay responsive
+  const deferred = useDeferredValue(plan)
+  const rows = useMemo(
+    () =>
+      improvementHints(deferred)
+        .map((h) => {
+          try {
+            return { ...h, k: kpis(h.plan, simulate(h.plan), h.plan.retirementAge, real) }
+          } catch {
+            return undefined
+          }
+        })
+        .filter((h) => h !== undefined)
+        .sort((a, b) => b.k.finalAssets.value - a.k.finalAssets.value),
+    [deferred, real],
+  )
+  if (rows.length === 0) return null
+  const maxGain = Math.max(1, ...rows.map((r) => r.k.finalAssets.value - base.finalAssets.value))
+  return (
+    <section className={`card hints ${deferred !== plan ? 'stale' : ''}`}>
+      <h2>効果が大きい見直し</h2>
+      <p className="note">
+        ひとつずつ変えたときに、資産がどれだけ変わるかの目安です（ほかの条件はそのまま）。効果が大きい順に並べています。プランは変わりません。反映するには、かんたん入力か詳細設定で変えてください。
+      </p>
+      <div className="table-wrap">
+        <table className="num-table hint-table">
+          <thead>
+            <tr>
+              <th className="text">見直し</th>
+              <th>{base.finalAssets.age}歳時点の資産</th>
+              <th>定年時点の資産</th>
+              <th>資金が尽きる年齢</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const gain = r.k.finalAssets.value - base.finalAssets.value
+              return (
+                <tr key={r.id}>
+                  <th className="text">
+                    {r.label}
+                    <small>{r.detail}</small>
+                  </th>
+                  <td className="bar" style={{ '--bar': Math.max(0, gain) / maxGain } as CSSProperties}>
+                    <span>
+                      <Gain value={r.k.finalAssets.value} base={base.finalAssets.value} />
+                    </span>
+                  </td>
+                  <td>
+                    <Gain value={r.k.assetsAtRetirement?.value} base={base.assetsAtRetirement?.value} />
+                  </td>
+                  <td>
+                    <ShortfallAge age={r.k.firstShortfall?.age} base={base.firstShortfall?.age} />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="note">{real ? 'いまの物価に換算した差です。' : '額面（将来の金額）での差です。'}</p>
+    </section>
   )
 }
 

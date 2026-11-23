@@ -26,6 +26,7 @@ export const EXPENSE_LABELS = {
   insurance: '保険',
   special: '特別費',
   car: '車',
+  care: '介護',
   other: 'その他',
 } as const
 

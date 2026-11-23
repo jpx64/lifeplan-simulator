@@ -66,6 +66,8 @@ interface PersonMonth {
   benefit: number
   /** Own public pension (taxable). */
   pension: number
+  /** iDeCo / DC received as an annuity (taxed together with public pensions). */
+  dcPension: number
   /** Survivor's pension (non-taxable). */
   survivorPension: number
   socialInsurance: number
@@ -170,11 +172,15 @@ interface ContractualAccountMonth {
   balance: number
   costBasis: number
   contribution: number
+  /** Part of the contribution paid by the member (iDeCo, private annuity, DC matching contribution). */
+  ownContribution: number
   growth: number
   /** Lump sum received at the receiving age (taxed as retirement income later). */
   lumpSum: number
-  /** Annuity payout (gross). */
+  /** Private annuity insurance payout (gross). */
   annuityPayout: number
+  /** iDeCo / DC received as an annuity (gross, taxed as 公的年金等). */
+  pensionPayout: number
   /** Balance paid out at death (death benefit, not taxed here). */
   deathPayout: number
   /** Taxable gain part of annuity payouts (miscellaneous income). */
@@ -188,13 +194,29 @@ function simulateContractual(ctx: Context, acc: Account, rate: RateFn): Map<numb
   const birth = ctx.births.get(acc.ownerId)!
   let balance = acc.balance
   let basis = acc.costBasis ?? acc.balance
-  const receiveT = acc.receiveAge !== undefined ? monthAtAge(birth, acc.receiveAge) : undefined
-  const payoutStart = acc.payoutStartAge !== undefined ? monthAtAge(birth, acc.payoutStartAge) : undefined
+  const isDc = acc.kind === 'ideco' || acc.kind === 'dc'
+  const receiveT = isDc && acc.receiveAge !== undefined ? monthAtAge(birth, acc.receiveAge) : undefined
+  const receiveMode = isDc ? (acc.receiveMode ?? 'lump') : 'lump'
+  const lumpShare = receiveMode === 'lump' ? 1 : receiveMode === 'annuity' ? 0 : Math.min(1, Math.max(0, acc.lumpShare ?? 0.5))
+  // iDeCo / DC annuity: paid monthly from the receiving age over `annuityYears`
+  const dcPayoutEnd = receiveT !== undefined && lumpShare < 1 ? receiveT + Math.min(20, Math.max(5, acc.annuityYears ?? 10)) * 12 - 1 : undefined
+  const payoutStart = acc.kind === 'annuity' && acc.payoutStartAge !== undefined ? monthAtAge(birth, acc.payoutStartAge) : undefined
   const payoutEnd = payoutStart !== undefined ? payoutStart + (acc.payoutYears ?? 10) * 12 - 1 : undefined
   const deathT = ctx.deceasedId === acc.ownerId ? ctx.deathT : undefined
   let gainRatio = 0
   for (let t = ctx.startT; t <= ctx.endT; t++) {
-    const rec: ContractualAccountMonth = { balance: 0, costBasis: 0, contribution: 0, growth: 0, lumpSum: 0, annuityPayout: 0, deathPayout: 0, taxableGain: 0 }
+    const rec: ContractualAccountMonth = {
+      balance: 0,
+      costBasis: 0,
+      contribution: 0,
+      ownContribution: 0,
+      growth: 0,
+      lumpSum: 0,
+      annuityPayout: 0,
+      pensionPayout: 0,
+      deathPayout: 0,
+      taxableGain: 0,
+    }
     if (deathT !== undefined && t > deathT) {
       out.set(t, rec)
       continue
@@ -213,6 +235,12 @@ function simulateContractual(ctx: Context, acc: Account, rate: RateFn): Map<numb
         rec.contribution += c.monthly
         if (c.extraAnnual && monthOf(t) === (c.extraMonth ?? 12)) rec.contribution += c.extraAnnual
       }
+      if (acc.kind !== 'dc') rec.ownContribution = rec.contribution
+      // DC matching contribution: only while the employer contributes
+      else if (rec.contribution > 0 && acc.matchingMonthly) {
+        rec.ownContribution = acc.matchingMonthly
+        rec.contribution += acc.matchingMonthly
+      }
     }
     balance += rec.contribution
     basis += rec.contribution
@@ -221,11 +249,19 @@ function simulateContractual(ctx: Context, acc: Account, rate: RateFn): Map<numb
       balance = 0
       basis = 0
       rec.event = `${acc.label}の死亡一時金`
-    } else if (receiveT !== undefined && t === receiveT && balance > 0) {
-      rec.lumpSum = balance
-      balance = 0
+    } else if (receiveT !== undefined && t >= receiveT && (t === receiveT || (dcPayoutEnd !== undefined && t <= dcPayoutEnd)) && balance > 0) {
+      if (t === receiveT && lumpShare > 0) {
+        rec.lumpSum = balance * lumpShare
+        balance -= rec.lumpSum
+        rec.event = lumpShare < 1 ? `${acc.label}の一部を一時金で受け取り、残りは年金で受け取り開始` : `${acc.label}を一時金で受け取り`
+      } else if (t === receiveT) {
+        rec.event = `${acc.label}を年金で受け取り開始`
+      }
+      if (dcPayoutEnd !== undefined) {
+        rec.pensionPayout = balance / (dcPayoutEnd - t + 1)
+        balance -= rec.pensionPayout
+      }
       basis = 0
-      rec.event = `${acc.label}を一時金で受け取り`
     } else if (payoutStart !== undefined && payoutEnd !== undefined && t >= payoutStart && t <= payoutEnd && balance > 0) {
       if (t === payoutStart) {
         gainRatio = balance > 0 ? Math.max(0, 1 - basis / balance) : 0
@@ -372,6 +408,32 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
   }
   const lumpNet = retirementLumpNet(lumps)
 
+  /** iDeCo / DC annuity payments of a member in month t. */
+  const dcPensionAt = (memberId: string, t: number) => {
+    let sum = 0
+    for (const acc of plan.accounts) {
+      if (acc.ownerId === memberId && (acc.kind === 'ideco' || acc.kind === 'dc')) sum += contractual.get(acc.id)?.get(t)?.pensionPayout ?? 0
+    }
+    return sum
+  }
+  /** Monthly contributions planned for an account in month t. */
+  const plannedContribution = (acc: Account, t: number) => {
+    let sum = 0
+    for (const c of acc.contributions) {
+      if (!inRange(t, c.from, c.to)) continue
+      sum += c.monthly
+      if (c.extraAnnual && monthOf(t) === (c.extraMonth ?? 12)) sum += c.extraAnnual
+    }
+    return sum
+  }
+  /** 持株会奨励金 for an employee stock account in month t (while the owner is employed with social insurance). */
+  const incentiveOf = (acc: Account, t: number) => {
+    if (acc.kind !== 'stock' || !acc.incentiveRate) return 0
+    const w = workAt(plan, acc.ownerId, t)
+    return w?.kind === 'employed' && w.socialInsurance !== false ? plannedContribution(acc, t) * acc.incentiveRate : 0
+  }
+  const incentiveAt = (memberId: string, t: number) => plan.accounts.reduce((sum, acc) => sum + (acc.ownerId === memberId ? incentiveOf(acc, t) : 0), 0)
+
   // ---------- pass 1: person income per month (from January of the start year) ----------
   const person = new Map<string, Map<number, PersonMonth>>()
   for (const m of ctx.adults) {
@@ -380,14 +442,26 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
     for (let t = ctx.calcStartT; t <= ctx.endT; t++) {
       // months before the start are assumed to look like the start month (for annual tax)
       const tt = Math.max(t, ctx.startT)
-      const pm: PersonMonth = { salary: 0, bonus: 0, benefit: 0, pension: 0, survivorPension: 0, socialInsurance: 0, employee: false, totalPayMonthly: 0, pensionBase: 0 }
+      const pm: PersonMonth = {
+        salary: 0,
+        bonus: 0,
+        benefit: 0,
+        pension: 0,
+        dcPension: dcPensionAt(m.id, tt),
+        survivorPension: 0,
+        socialInsurance: 0,
+        employee: false,
+        totalPayMonthly: 0,
+        pensionBase: 0,
+      }
       map.set(t, pm)
       if (!ctx.alive(m.id, tt)) continue
       const age = ageAt(birth, tt)
       const w = workAt(plan, m.id, tt)
       if (w?.kind === 'employed') {
         const sal = salaryAt(ctx, w, tt)
-        pm.salary = sal.monthly
+        // 持株会奨励金 is paid as part of the salary (taxed, counted for social insurance) and goes into the stock account
+        pm.salary = sal.monthly + incentiveAt(m.id, tt)
         pm.bonus = monthOf(t) === 6 || monthOf(t) === 12 ? sal.bonus / 2 : 0
         pm.totalPayMonthly = sal.monthly + sal.bonus / 12
         if (w.socialInsurance !== false) {
@@ -558,12 +632,13 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
     return sum
   }
 
+  /** 小規模企業共済等掛金控除: iDeCo contributions and DC matching contributions. */
   const idecoContribOf = (memberId: string, y: number) => {
     let sum = 0
     for (const acc of plan.accounts) {
-      if (acc.ownerId !== memberId || acc.kind !== 'ideco') continue
+      if (acc.ownerId !== memberId || (acc.kind !== 'ideco' && acc.kind !== 'dc')) continue
       const c = contractual.get(acc.id)!
-      for (let mth = 0; mth < 12; mth++) sum += c.get(Math.max(y * 12 + mth, ctx.startT))?.contribution ?? 0
+      for (let mth = 0; mth < 12; mth++) sum += c.get(Math.max(y * 12 + mth, ctx.startT))?.ownContribution ?? 0
     }
     return sum
   }
@@ -596,7 +671,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
   // national health insurance / pension for adults who are not employees nor dependents
   const grossIncome = (memberId: string, y: number) =>
     salaryIncome(annualSum(memberId, y, (p) => p.salary + p.bonus)) +
-    pensionIncome(annualSum(memberId, y, (p) => p.pension), ageAtYearEnd(ctx.births.get(memberId)!, y))
+    pensionIncome(annualSum(memberId, y, (p) => p.pension + p.dcPension), ageAtYearEnd(ctx.births.get(memberId)!, y))
 
   /** Dependent under the spouse's employee insurance (年収130万円未満、60歳以上は180万円未満). */
   const isDependentOfEmployee = (memberId: string, t: number) => {
@@ -605,7 +680,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
     const op = person.get(other.id)!.get(t)
     if (!op?.employee) return false
     const age = ageAt(ctx.births.get(memberId)!, t)
-    const income = annualSum(memberId, yearOf(t), (p) => p.salary + p.bonus + p.pension)
+    const income = annualSum(memberId, yearOf(t), (p) => p.salary + p.bonus + p.pension + p.dcPension)
     return age < 75 && income < (age >= 60 ? 1_800_000 : 1_300_000)
   }
 
@@ -659,7 +734,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
       const res = annualTax({
         age,
         salaryGross: annualSum(m.id, y, (p) => p.salary + p.bonus),
-        pensionGross: annualSum(m.id, y, (p) => p.pension),
+        pensionGross: annualSum(m.id, y, (p) => p.pension + p.dcPension),
         otherIncome: otherIncomeOf(m.id, y),
         socialInsurancePaid: annualSum(m.id, y, (p) => p.socialInsurance),
         smallBusinessMutualAid: idecoContribOf(m.id, y),
@@ -731,10 +806,10 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
   const withheldFor = (memberId: string, t: number) => {
     const y = yearOf(t)
     const res = taxes.get(memberId)!.get(y)!
-    const yearGross = annualSum(memberId, y, (p) => p.salary + p.bonus + p.pension)
+    const yearGross = annualSum(memberId, y, (p) => p.salary + p.bonus + p.pension + p.dcPension)
     if (yearGross <= 0) return 0
     const p = person.get(memberId)!.get(t)!
-    return (res.incomeTaxWithheld * (p.salary + p.bonus + p.pension)) / yearGross
+    return (res.incomeTaxWithheld * (p.salary + p.bonus + p.pension + p.dcPension)) / yearGross
   }
   /** Year-end adjustment (December, if employed) or tax return refund (next March). */
   const refundFor = (memberId: string, t: number) => {
@@ -839,16 +914,16 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
       const c = contractual.get(acc.id)?.get(t)
       if (!c) continue
       const lump = c.lumpSum > 0 ? dcLumps.get(`${acc.id}:${t}`) : undefined
-      inc.accountPayout += c.annuityPayout + c.deathPayout + (lump ? (lumpNet.get(lump) ?? 0) : 0)
+      inc.accountPayout += c.annuityPayout + c.pensionPayout + c.deathPayout + (lump ? (lumpNet.get(lump) ?? 0) : 0)
       if (c.event) events.push(c.event)
-      // corporate DC contributions are paid by the employer
-      if (acc.kind !== 'dc') contractualContrib += c.contribution
+      // corporate DC contributions are paid by the employer (only the matching contribution comes from the salary)
+      contractualContrib += c.ownContribution
       accountStates[acc.id] = {
         balance: c.balance,
         costBasis: c.costBasis,
         contribution: c.contribution,
         growth: c.growth,
-        withdrawal: c.lumpSum + c.annuityPayout + c.deathPayout,
+        withdrawal: c.lumpSum + c.annuityPayout + c.pensionPayout + c.deathPayout,
       }
     }
 
@@ -856,7 +931,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
     ded.total = ded.socialInsurance + ded.incomeTax + ded.residentTax
 
     // ---- expenses ----
-    const ex = { living: 0, allowance: 0, insurance: 0, special: 0, car: 0, education: 0, childLiving: 0, housing: 0, other: 0, total: 0 }
+    const ex = { living: 0, allowance: 0, insurance: 0, special: 0, car: 0, care: 0, education: 0, childLiving: 0, housing: 0, other: 0, total: 0 }
     const livingFactor = expenseMult * (afterDeath ? death!.livingRatio : 1)
     for (const e of plan.expenses) {
       // insurance premiums paid by the deceased stop at the death
@@ -915,7 +990,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
         if (yearSince >= 1) ex.housing += propertyTaxAnnual(purchase, yearSince) / 4
       }
     }
-    ex.total = ex.living + ex.allowance + ex.insurance + ex.special + ex.car + ex.education + ex.childLiving + ex.housing + ex.other
+    ex.total = ex.living + ex.allowance + ex.insurance + ex.special + ex.car + ex.care + ex.education + ex.childLiving + ex.housing + ex.other
 
     const net = inc.total - ded.total - ex.total
     cash += net - contractualContrib
@@ -951,12 +1026,8 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
     }
     for (const acc of voluntary) {
       if (!ctx.alive(acc.ownerId, t)) continue
-      let want = 0
-      for (const c of acc.contributions) {
-        if (!inRange(t, c.from, c.to)) continue
-        want += c.monthly
-        if (c.extraAnnual && monthOf(t) === (c.extraMonth ?? 12)) want += c.extraAnnual
-      }
+      // the 持株会奨励金 (paid with the salary) is invested together with the member's own contribution
+      const want = plannedContribution(acc, t) + incentiveOf(acc, t)
       if (want <= 0 || cash - want < s.cashFloor) continue // pause saving while below the emergency fund
       invest(acc, want)
       cash -= want

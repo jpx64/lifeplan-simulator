@@ -23,6 +23,7 @@
   --c7: #c46aa8;
   --c8: #8a9a3c;
   --c9: #8a7f72;
+  --c10: #a9603f;
   --zebra: #f6f8fa;
   --bar-fill: rgba(76, 123, 217, 0.16);
   --radius: 10px;
@@ -56,6 +57,7 @@
     --c7: #dc8ac2;
     --c8: #b0c25a;
     --c9: #b3a898;
+    --c10: #d08a68;
     --zebra: #1e2530;
     --bar-fill: rgba(111, 156, 240, 0.2);
     --shadow: none;
@@ -1017,12 +1019,14 @@ ul.plain li {
   color: var(--good);
 }
 /* 資産合計: value with a bar behind it, scaled to the largest year */
-.year-table td.bar {
+.year-table td.bar,
+.hint-table td.bar {
   position: relative;
   font-weight: 700;
   min-width: 120px;
 }
-.year-table td.bar::before {
+.year-table td.bar::before,
+.hint-table td.bar::before {
   content: '';
   position: absolute;
   left: 8px;
@@ -1033,7 +1037,8 @@ ul.plain li {
   background: var(--bar-fill);
   border-radius: 4px;
 }
-.year-table td.bar > span {
+.year-table td.bar > span,
+.hint-table td.bar > span {
   position: relative;
 }
 .year-table td.events {
@@ -1188,4 +1193,145 @@ details.assumptions + .callout {
   .matrix td strong {
     font-size: 1rem;
   }
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ---------- improvement hints ---------- */
+.hints {
+  transition: opacity 0.15s;
+}
+.hints.stale {
+  opacity: 0.6;
+}
+.hint-table tbody th.text {
+  font-weight: 600;
+  min-width: 220px;
+}
+.hint-table tbody th small {
+  display: block;
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.hint-table td.bar {
+  min-width: 140px;
+  font-weight: 700;
+}
+
+/* ---------- scenario compare: work axis ---------- */
+.axis-off {
+  margin: 0;
+}
+.matrix thead th.group {
+  text-align: center;
+  border-left: 1px solid var(--grid);
+  color: var(--text);
+}
+.matrix td .line-sample {
+  float: left;
+  margin-top: 8px;
+}
+
+/* ---------- charts: tooltip under the chart on phones ---------- */
+.tip-dock {
+  margin-top: 8px;
+  min-height: 2.2em;
+}
+.tip-dock:empty::before {
+  content: attr(data-hint);
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 6px 2px;
+}
+.tip-dock .chart-tip {
+  box-shadow: none;
+  min-width: 0;
+  background: var(--surface-2);
+}
+
+/* ---------- dialogs, errors, reminders ---------- */
+dialog.modal {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+  width: min(560px, calc(100vw - 32px));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+}
+dialog.modal::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+.modal-body {
+  padding: 18px 20px;
+}
+.modal-body h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+.modal-body .actions,
+.crash .actions,
+.backup-reminder .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.share-url {
+  width: 100%;
+  font: inherit;
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  resize: vertical;
+}
+.crash h1,
+.crash h2 {
+  margin-top: 0;
+}
+.crash-detail {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  max-height: 240px;
+  overflow: auto;
+}
+.backup-reminder p {
+  margin: 0;
+}
+/* a tap or click on a chart focuses it; the focus ring is only useful for keyboard users */
+.chart-box :focus:not(:focus-visible) {
+  outline: none;
+}
+.chart-legend {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.chart-legend li.bold {
+  color: var(--text);
+  font-weight: 700;
+}
+.chart-legend .line-sample {
+  width: 18px;
 }
