@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { DEFAULT_EDUCATION, defaultPurchase } from '../engine/defaults'
 import { propertyTaxAnnual } from '../engine/housing'
-import { DEFAULT_VOLATILITY } from '../engine/simulate'
 import type {
   Account,
   AccountKind,
@@ -668,13 +667,6 @@ function AccountsSection({ plan, onChange, memberOptions }: { plan: Plan; onChan
               <ManField label="取得額（元本）" value={a.costBasis ?? a.balance} onChange={(v) => up({ costBasis: v })} step={10} hint="未入力なら時価と同じとみなします" />
             )}
             <PercentField label="想定利回り（年）" value={a.annualReturn} onChange={(v) => up({ annualReturn: v })} />
-            <PercentField
-              label="値動きの大きさ（年率の標準偏差）"
-              value={a.volatility ?? DEFAULT_VOLATILITY[a.kind]}
-              onChange={(v) => up({ volatility: v })}
-              step={1}
-              hint="運用リスクの試算に使います。株式の投資信託で15〜20%、債券中心で5%前後"
-            />
             {(a.kind === 'ideco' || a.kind === 'dc') && (
               <>
                 <NumField label="受け取りを始める年齢" value={a.receiveAge ?? 65} onChange={(v) => up({ receiveAge: v })} suffix="歳" min={60} max={75} />

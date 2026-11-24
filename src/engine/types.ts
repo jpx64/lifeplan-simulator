@@ -268,8 +268,6 @@ export interface Account {
   costBasis?: number
   /** Expected annual return. */
   annualReturn: number
-  /** Annual volatility used for Monte Carlo runs. Defaults by kind (e.g. 15% for NISA). */
-  volatility?: number
   contributions: Contribution[]
   /** nisa / taxable / stock: planned withdrawals. */
   withdrawal?: PlannedWithdrawal

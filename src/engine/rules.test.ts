@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_EDUCATION, defaultSettings } from './defaults'
 import { loanSchedule } from './housing'
-import { runMonteCarlo } from './montecarlo'
 import { BASIC_PENSION_FULL, CHILD_ADDITION, EARNINGS_RATE, SPOUSE_ADDITION } from './pension'
 import { analyzeDeath } from './risk'
 import { simulate } from './simulate'
@@ -247,27 +246,5 @@ describe('cash ceiling sweep', () => {
     expect(r.cash).toBeCloseTo(3_000_000, 6)
     // the person has no job, so national health insurance and pension are paid first
     expect(r.accounts.tx.balance).toBeCloseTo(2_000_000 - r.deductions.total, 6)
-  })
-})
-
-describe('Monte Carlo', () => {
-  const plan = base({
-    settings: { ...base().settings, endAge: 45 },
-    accounts: [{ id: 'n', kind: 'nisa', ownerId: 'self', label: 'NISA', balance: 1_000_000, annualReturn: 0.05, contributions: [] }],
-  })
-  it('is reproducible with the same seed and spreads around the deterministic path', async () => {
-    const a = await runMonteCarlo(plan, { runs: 60, seed: 7 })
-    const b = await runMonteCarlo(plan, { runs: 60, seed: 7 })
-    expect(a.bands.p50).toEqual(b.bands.p50)
-    const last = a.bands.p50.length - 1
-    expect(a.bands.p10[last]).toBeLessThan(a.bands.p90[last])
-    expect(a.successRate).toBe(1)
-  })
-  it('with zero volatility every run equals the deterministic result', async () => {
-    const flat = { ...plan, accounts: plan.accounts.map((x) => ({ ...x, volatility: 0 })) }
-    const mc = await runMonteCarlo(flat, { runs: 5 })
-    const det = simulate(flat).rows.at(-1)!.totalAssets
-    expect(mc.bands.p10.at(-1)).toBeCloseTo(det, 3)
-    expect(mc.bands.p90.at(-1)).toBeCloseTo(det, 3)
   })
 })

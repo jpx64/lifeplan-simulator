@@ -5,7 +5,6 @@ import { kpis, yearly, type Kpis, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
 import { AssetChart, CashflowChart, ExpenseChart } from './Charts'
 import { man, manOku, pct, ymLabel } from './format'
-import { MonteCarloPanel } from './MonteCarlo'
 import { YearDetail } from './YearDetail'
 
 interface Adjust {
@@ -199,8 +198,6 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
         <ExpenseStats years={years} real={real} />
         <ExpenseChart plan={effective} years={years} onSelect={setSelectedYear} />
       </section>
-
-      <MonteCarloPanel plan={effective} years={years} real={real} />
 
       <section className="card">
         <h2>ライフイベント</h2>

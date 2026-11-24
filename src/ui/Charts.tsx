@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { MonteCarloResult } from '../engine/montecarlo'
 import { EXPENSE_LABELS, type ExpenseKey, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
 import { axisYen, man, pct } from './format'
@@ -86,8 +85,6 @@ interface TipItem {
   label: string
   value: number
   color?: string
-  /** Shown instead of the amount (e.g. a range). */
-  text?: string
 }
 
 /** Tooltip body: the items, a bold total row, then optional rows outside the total. */
@@ -98,7 +95,7 @@ function ChartTip({ title, items, total, after = [], shares }: { title: string; 
         {it.color && <span className="swatch" style={{ background: it.color }} />}
         {it.label}
       </th>
-      <td className={it.value < 0 ? 'neg' : undefined}>{it.text ?? man(it.value)}</td>
+      <td className={it.value < 0 ? 'neg' : undefined}>{man(it.value)}</td>
       {shares && <td className="share">{share && total && total.value > 0 ? pct(it.value / total.value, 0) : ''}</td>}
     </tr>
   )
@@ -284,54 +281,6 @@ export function ExpenseChart({ plan, years, onSelect }: { plan: Plan; years: Yea
           {keys.map((k) => (
             <Bar key={k} dataKey={k} name={EXPENSE_LABELS[k]} stackId="e" fill={EXPENSE_COLORS[k]} />
           ))}
-        </ComposedChart>
-      )}
-    </ChartBox>
-  )
-}
-
-export function BandChart({ mc, deterministic }: { mc: MonteCarloResult; deterministic?: number[] }) {
-  const data = mc.years.map((y, i) => ({
-    label: `${y}（${mc.ages[i]}歳）`,
-    outer: [mc.bands.p10[i], mc.bands.p90[i]],
-    inner: [mc.bands.p25[i], mc.bands.p75[i]],
-    median: mc.bands.p50[i],
-    base: deterministic?.[i],
-  }))
-  type Row = (typeof data)[number]
-  const range = (v: number[]) => `${man(v[0])} 〜 ${man(v[1])}`
-  return (
-    <ChartBox height={320}>
-      {(tip) => (
-        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-          <CartesianGrid stroke="var(--grid)" vertical={false} />
-          <XAxis dataKey="label" {...axisProps} minTickGap={40} />
-          <YAxis tickFormatter={axisYen} {...axisProps} width={64} domain={['auto', 'auto']} />
-          <Tooltip
-            content={({ active, payload }) => {
-              const r = payload?.[0]?.payload as Row | undefined
-              if (!active || !r) return null
-              return tip(
-                <ChartTip
-                  title={r.label}
-                  items={[
-                    { label: '10〜90%の範囲', value: r.outer[0], text: range(r.outer), color: 'color-mix(in srgb, var(--c1) 30%, transparent)' },
-                    { label: '25〜75%の範囲', value: r.inner[0], text: range(r.inner), color: 'color-mix(in srgb, var(--c1) 55%, transparent)' },
-                    { label: '中央値', value: r.median, color: 'var(--c1)' },
-                    ...(r.base !== undefined ? [{ label: '利回りが一定の場合', value: r.base, color: 'var(--muted)' }] : []),
-                  ]}
-                />,
-              )
-            }}
-          />
-          <Legend wrapperStyle={{ fontSize: 13 }} itemSorter={legendOrder(['outer', 'inner', 'median', 'base'])} />
-          <ReferenceLine y={0} stroke="var(--border-strong)" />
-          <Area type="monotone" dataKey="outer" name="10〜90%の範囲" stroke="none" fill="var(--c1)" fillOpacity={0.18} />
-          <Area type="monotone" dataKey="inner" name="25〜75%の範囲" stroke="none" fill="var(--c1)" fillOpacity={0.35} />
-          <Line type="monotone" dataKey="median" name="中央値" stroke="var(--c1)" strokeWidth={2} dot={false} />
-          {deterministic && (
-            <Line type="monotone" dataKey="base" name="利回りが一定の場合" stroke="var(--muted)" strokeDasharray="5 4" strokeWidth={1.5} dot={false} />
-          )}
         </ComposedChart>
       )}
     </ChartBox>

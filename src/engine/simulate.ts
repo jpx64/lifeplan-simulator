@@ -37,25 +37,10 @@ import {
   type SocialInsuranceRates,
 } from './tax'
 import { ageAt, ageAtYearEnd, indexToYm, monthAtAge, monthOf, schoolAge, yearOf, ymToIndex } from './time'
-import type { Account, AccountKind, AccountState, Member, MonthRow, PensionEstimate, Plan, SimulationResult, WorkPeriod } from './types'
+import type { Account, AccountState, Member, MonthRow, PensionEstimate, Plan, SimulationResult, WorkPeriod } from './types'
 
 export const NISA_ANNUAL_LIMIT = 3_600_000
 export const NISA_LIFETIME_LIMIT = 18_000_000
-
-/** Default annual volatility by account kind for Monte Carlo runs. */
-export const DEFAULT_VOLATILITY: Record<AccountKind, number> = {
-  nisa: 0.15,
-  taxable: 0.15,
-  ideco: 0.15,
-  dc: 0.12,
-  stock: 0.25,
-  annuity: 0,
-}
-
-export interface SimulateOptions {
-  /** Standard-normal market shocks per month from the start month (Monte Carlo runs). */
-  shocks?: Float64Array
-}
 
 const monthlyRate = (annual: number) => Math.pow(1 + annual, 1 / 12) - 1
 
@@ -156,18 +141,6 @@ function leaveBaseSalary(ctx: Context, leave: WorkPeriod): number {
   return salaryAt(ctx, prev, leaveStart - 1).monthly
 }
 
-type RateFn = (acc: Account, t: number) => number
-
-function makeRateFn(ctx: Context, opts?: SimulateOptions): RateFn {
-  return (acc, t) => {
-    const sigma = acc.volatility ?? DEFAULT_VOLATILITY[acc.kind]
-    if (!opts?.shocks || !sigma) return monthlyRate(acc.annualReturn)
-    const b = sigma / Math.sqrt(12)
-    const a = Math.log(1 + acc.annualReturn) / 12 - (b * b) / 2
-    return Math.exp(a + b * (opts.shocks[t - ctx.startT] ?? 0)) - 1
-  }
-}
-
 interface ContractualAccountMonth {
   balance: number
   costBasis: number
@@ -189,7 +162,7 @@ interface ContractualAccountMonth {
 }
 
 /** iDeCo, corporate DC and private annuity insurance do not depend on cash, so they are simulated up front. */
-function simulateContractual(ctx: Context, acc: Account, rate: RateFn): Map<number, ContractualAccountMonth> {
+function simulateContractual(ctx: Context, acc: Account): Map<number, ContractualAccountMonth> {
   const out = new Map<number, ContractualAccountMonth>()
   const birth = ctx.births.get(acc.ownerId)!
   let balance = acc.balance
@@ -221,7 +194,7 @@ function simulateContractual(ctx: Context, acc: Account, rate: RateFn): Map<numb
       out.set(t, rec)
       continue
     }
-    rec.growth = balance * rate(acc, t)
+    rec.growth = balance * monthlyRate(acc.annualReturn)
     balance += rec.growth
     const age = ageAt(birth, t)
     const contributing =
@@ -324,11 +297,10 @@ function retirementLumpNet(lumps: Lump[]): Map<Lump, number> {
   return net
 }
 
-export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
+export function simulate(plan: Plan): SimulationResult {
   const ctx = buildContext(plan)
   const s = plan.settings
   const warnings: string[] = []
-  const rate = makeRateFn(ctx, opts)
   const pensionMult = s.pensionMultiplier ?? 1
   const expenseMult = s.expenseMultiplier ?? 1
   const death = ctx.deathT !== undefined ? plan.death : undefined
@@ -374,7 +346,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
   // ---------- contractual accounts ----------
   const contractual = new Map<string, Map<number, ContractualAccountMonth>>()
   for (const acc of plan.accounts) {
-    if (acc.kind === 'ideco' || acc.kind === 'dc' || acc.kind === 'annuity') contractual.set(acc.id, simulateContractual(ctx, acc, rate))
+    if (acc.kind === 'ideco' || acc.kind === 'dc' || acc.kind === 'annuity') contractual.set(acc.id, simulateContractual(ctx, acc))
   }
 
   // ---------- retirement lump sums ----------
@@ -761,7 +733,6 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
         label: `課税口座（NISA枠超過分・${plan.members.find((m) => m.id === n.ownerId)?.name ?? ''}）`,
         balance: 0,
         annualReturn: n.annualReturn,
-        volatility: n.volatility,
         contributions: [],
         withdrawal: n.withdrawal,
       })
@@ -998,7 +969,7 @@ export function simulate(plan: Plan, opts?: SimulateOptions): SimulationResult {
     // ---- liquid accounts: growth, contributions, planned withdrawals ----
     for (const acc of liquidAccounts) {
       const st = state.get(acc.id)!
-      const growth = st.balance * rate(acc, t)
+      const growth = st.balance * monthlyRate(acc.annualReturn)
       st.balance += growth
       accountStates[acc.id] = { balance: 0, costBasis: 0, contribution: 0, growth, withdrawal: 0 }
     }
