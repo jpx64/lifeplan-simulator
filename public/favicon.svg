@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Lifeplan Simulator: assets rising over a lifetime -->
+  <rect width="64" height="64" rx="14" fill="#2f6fdb"/>
+  <path d="M11 52V45C19 44 23 37 31 35C39 33 43 24 52 15V52Z" fill="#fff" fill-opacity=".3"/>
+  <path d="M11 45C19 44 23 37 31 35C39 33 43 24 52 15" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
