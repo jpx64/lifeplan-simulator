@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { DEFAULT_EDUCATION } from '../engine/defaults'
 import { simulate } from '../engine/simulate'
-import type { EducationPlan } from '../engine/types'
+import { shortfallSpans, type ShortfallSpan } from '../engine/summary'
+import { ymToIndex } from '../engine/time'
+import type { EducationPlan, Plan } from '../engine/types'
 import { buildPlan, normalizeWizard, type CareInput, type WizardAdult, type WizardInput, type WorkStyle } from '../engine/wizard'
 import { CheckField, ManField, MonthField, NumField, PercentField, SelectField, TextField } from './fields'
-import { man } from './format'
+import { man, pct, ymLabel } from './format'
 
 const STEPS = ['家族', '働き方', '住まい', 'いまの資産', '毎月の支出', '老後'] as const
 
@@ -22,15 +24,24 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
   const setAdult = (who: 'self' | 'spouse', patch: Partial<WizardAdult>) => setW((x) => ({ ...x, [who]: { ...x[who], ...patch } }))
   const setHousing = (patch: Partial<WizardInput['housing']>) => setW((x) => ({ ...x, housing: { ...x.housing, ...patch } }))
   const adults: ('self' | 'spouse')[] = w.hasSpouse ? ['self', 'spouse'] : ['self']
-  // live pension estimate on the last step
-  const pensionPreview = useMemo(() => {
-    if (step !== 5) return undefined
+  // the plan as entered so far: the money at a house purchase (from the housing step) and the pension estimate (last step)
+  const preview = useMemo(() => {
+    if (step < 2) return undefined
     try {
-      return simulate(buildPlan(w)).pensions
+      const plan = buildPlan(w)
+      return { plan, result: simulate(plan) }
     } catch {
       return undefined
     }
   }, [w, step])
+  const pensionPreview = step === 5 ? preview?.result.pensions : undefined
+  const buysLater = w.housing.mode === 'buy' && w.housing.buyYM > w.start
+  // short of money within a year of the purchase: the down payment and costs are more than the savings
+  const purchaseGap = useMemo(() => {
+    if (!preview || !buysLater) return undefined
+    const buyT = ymToIndex(w.housing.buyYM)
+    return shortfallSpans(preview.result.rows).find((s) => s.from.t >= buyT && s.from.t < buyT + 12)
+  }, [preview, buysLater, w.housing.buyYM])
 
   return (
     <div className="wizard">
@@ -291,6 +302,7 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
                 <p className="note">
                   固定資産税・都市計画税は物件価格から自動で概算します。諸費用（物件価格の7%）、火災・地震保険、修繕費も自動で入ります。あとから「詳細設定」で変更できます。
                 </p>
+                {buysLater && preview && <PurchaseCheck plan={preview.plan} gap={purchaseGap} early />}
               </>
             )}
           </>
@@ -499,6 +511,7 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
                 <ManField label="預金の上限" value={w.cashCeiling ?? 10_000_000} onChange={(v) => set('cashCeiling', v)} step={50} />
               </div>
             )}
+            {purchaseGap && preview && <PurchaseCheck plan={preview.plan} gap={purchaseGap} onFix={() => setStep(2)} />}
           </>
         )}
       </section>
@@ -525,6 +538,39 @@ export function Wizard({ initial, onFinish, onCancel, finishLabel }: Props) {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The money needed when buying a home, and a warning when it is more than the savings at that time.
+ * `early`: shown before the assets and expenses are entered, so it says what the check is based on.
+ */
+function PurchaseCheck({ plan, gap, early, onFix }: { plan: Plan; gap?: ShortfallSpan; early?: boolean; onFix?: () => void }) {
+  const p = plan.housing.purchase
+  if (!p) return null
+  const down = p.price - (p.loan?.amount ?? 0)
+  const costs = p.price * p.closingCostRate
+  return (
+    <div className={`callout purchase-check ${gap ? 'warn' : ''}`} role={gap ? 'status' : undefined}>
+      <p>
+        購入時に必要なお金の目安: 頭金 {man(down)}＋諸費用 約{man(costs)}（物件価格の{pct(p.closingCostRate, 0)}）＝ 約{man(down + costs)}
+      </p>
+      {gap && (
+        <p>
+          <strong>
+            このままだと、{gap.from.ym === gap.to.ym ? ymLabel(gap.from.ym) : `${ymLabel(gap.from.ym)}〜${ymLabel(gap.to.ym)}`}にお金が最大{man(gap.maxDeficit)}
+            足りなくなります。
+          </strong>
+          頭金を減らす、購入を遅らせる、それまでに貯めるなどで解消できます。
+        </p>
+      )}
+      {early && <p className="note">預貯金や毎月の支出は、この先の画面で入力した値（まだなら初期値）で試算しています。</p>}
+      {onFix && (
+        <button type="button" className="link" onClick={onFix}>
+          住まいの入力に戻る
+        </button>
+      )}
     </div>
   )
 }

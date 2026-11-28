@@ -4,6 +4,7 @@ import { defaultPurchase, defaultSettings } from './defaults'
 import { samplePlan } from './sample'
 import { loanSchedule, pmt, propertyTaxAnnual } from './housing'
 import { NISA_ANNUAL_LIMIT, simulate } from './simulate'
+import { shortfallSpans } from './summary'
 import { schoolAge, ymToIndex } from './time'
 import type { Plan } from './types'
 
@@ -198,7 +199,9 @@ describe('simulate: refill cash from accounts', () => {
     const plan = bare({ expenses: [{ id: 'e', label: 'x', category: 'living', frequency: 'monthly', amount: 600_000, inflate: false }] })
     const res = simulate(plan)
     expect(res.rows[1].shortfall).toBe(true)
-    expect(res.warnings[0]).toContain('2030-02')
+    const [span] = shortfallSpans(res.rows)
+    expect(span.from.ym).toBe('2030-02')
+    expect(span.toEnd).toBe(true)
   })
 })
 

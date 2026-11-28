@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { analyzeDeath, deathScenarioAtAge } from '../engine/risk'
 import { simulate } from '../engine/simulate'
-import { yearly } from '../engine/summary'
+import { realMonth, shortfallSpans, yearly } from '../engine/summary'
 import { ageAt, ymToIndex } from '../engine/time'
 import type { Plan } from '../engine/types'
 import { CompareChart } from './Charts'
@@ -42,7 +42,10 @@ export function Risk({ plan, real }: { plan: Plan; real: boolean }) {
   }, [plan, memberId, livingRatio, survivorIsWife])
 
   const gap = analysis.requiredCoverage - insurance
-  const short = analysis.result.rows.find((r) => r.shortfall)
+  const spans = useMemo(() => shortfallSpans(real ? analysis.result.rows.map(realMonth) : analysis.result.rows), [analysis, real])
+  const runsOut = spans.find((s) => s.toEnd)
+  const brief = spans.find((s) => !s.toEnd)
+  const whenFor = (ym: string, ages: Record<string, number>) => (survivor ? `${survivor.name}が${ages[survivor.id]}歳` : `${ym.slice(0, 4)}年`)
   const deathYear = Math.floor(ymToIndex(analysis.scenario.ym) / 12)
   const after = deathYears.filter((y) => y.year >= deathYear).slice(0, 12)
 
@@ -84,17 +87,27 @@ export function Risk({ plan, real }: { plan: Plan; real: boolean }) {
           <strong className="kpi-value">{man(analysis.survivorPensionFirstYear)}</strong>
           <span className="kpi-sub">遺族年金を含む（非課税）</span>
         </div>
-        <div className={`kpi ${short ? 'bad' : 'good'}`}>
-          <span className="kpi-label">保険金を含めた資金ショート</span>
-          <strong className="kpi-value">{short ? `${short.ym.slice(0, 4)}年` : 'なし'}</strong>
-          <span className="kpi-sub">
-            {short
-              ? survivor
-                ? `${survivor.name}が${short.ages[survivor.id]}歳のとき`
-                : `${Number(short.ym.slice(5))}月`
-              : `${baseYears.at(-1)?.year ?? ''}年まで`}
-          </span>
-        </div>
+        {runsOut ? (
+          <div className="kpi bad">
+            <span className="kpi-label">保険金を含めても、お金が尽きる時期</span>
+            <strong className="kpi-value">{runsOut.from.ym.slice(0, 4)}年</strong>
+            <span className="kpi-sub">{whenFor(runsOut.from.ym, runsOut.from.ages)}のとき。その後も足りないまま</span>
+          </div>
+        ) : brief ? (
+          <div className="kpi warn">
+            <span className="kpi-label">保険金を含めても、一時的に足りなくなる額</span>
+            <strong className="kpi-value">最大{man(brief.maxDeficit)}</strong>
+            <span className="kpi-sub">
+              {brief.from.ym.slice(0, 4)}年（{whenFor(brief.from.ym, brief.from.ages)}）から。その後は持ち直す
+            </span>
+          </div>
+        ) : (
+          <div className="kpi good">
+            <span className="kpi-label">保険金を含めた、お金が尽きる時期</span>
+            <strong className="kpi-value">なし</strong>
+            <span className="kpi-sub">{baseYears.at(-1)?.year ?? ''}年まで</span>
+          </div>
+        )}
       </div>
 
       <section className="card">

@@ -12,6 +12,7 @@
   --accent-soft: #e7effc;
   --good: #1f8a5b;
   --bad: #c2412d;
+  --warn: #9a6200;
   --warn-bg: #fff6e0;
   --warn-border: #f0c96a;
   --c1: #4c7bd9;
@@ -46,6 +47,7 @@
     --accent-soft: #1f2d45;
     --good: #4cc390;
     --bad: #ef7c66;
+    --warn: #e3b04b;
     --warn-bg: #3a2f14;
     --warn-border: #7a6224;
     --c1: #6f9cf0;
@@ -168,8 +170,17 @@ h4 {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  min-width: 240px;
+  min-width: 280px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.menu-body button {
+  text-align: left;
+}
+.menu-body hr {
+  align-self: stretch;
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
 }
 
 /* ---------- tabs ---------- */
@@ -375,6 +386,12 @@ input[type='number'] {
   background: var(--warn-bg);
   border-color: var(--warn-border);
 }
+.callout p + p {
+  margin-top: 6px;
+}
+.purchase-check {
+  margin: 12px 0 0;
+}
 .callout p {
   margin: 0;
 }
@@ -416,6 +433,9 @@ input[type='number'] {
 }
 .kpi.bad .kpi-value {
   color: var(--bad);
+}
+.kpi.warn .kpi-value {
+  color: var(--warn);
 }
 
 .sliders {
@@ -708,6 +728,43 @@ input[type='number'] {
   .tab-bar .segmented {
     margin-top: 0;
   }
+
+  /* a short header: title, plan and one menu, then every tab in view (wrapped, not scrolled) */
+  .app-header {
+    padding: 12px 0 10px;
+    gap: 8px;
+  }
+  .brand h1 {
+    font-size: 1.1rem;
+  }
+  .brand p {
+    display: none;
+  }
+  .plan-bar {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .plan-select {
+    flex: 1;
+    min-width: 0;
+  }
+  .tab-bar {
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+  }
+  .tabs {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+  .tabs button {
+    border-bottom: none;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+  .tabs button.on {
+    background: var(--accent-soft);
+  }
 }
 
 /* ---------- segmented control ---------- */
@@ -791,6 +848,9 @@ input[type='number'] {
 }
 .pos {
   color: var(--good);
+}
+.warn-text {
+  color: var(--warn);
 }
 .months {
   margin-top: 12px;

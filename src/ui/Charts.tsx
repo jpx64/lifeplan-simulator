@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { EXPENSE_LABELS, type ExpenseKey, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
 import { axisYen, man, pct } from './format'
+import { useMediaQuery } from './useMediaQuery'
 
 const GROUPS = [
   { key: 'cash', label: '預貯金', color: 'var(--c1)' },
@@ -36,17 +37,6 @@ function groupOf(plan: Plan, accountId: string): 'nisa' | 'taxable' | 'pension' 
 /** Phones and tablets: no mouse to hover with, and a tooltip over the chart hides what it explains. */
 const DOCK_QUERY = '(max-width: 640px), (hover: none)'
 
-function useDockedTips() {
-  const [docked, setDocked] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(DOCK_QUERY).matches)
-  useEffect(() => {
-    const m = matchMedia(DOCK_QUERY)
-    const on = () => setDocked(m.matches)
-    m.addEventListener('change', on)
-    return () => m.removeEventListener('change', on)
-  }, [])
-  return docked
-}
-
 type Tip = (body: ReactNode) => ReactNode
 
 /**
@@ -54,7 +44,7 @@ type Tip = (body: ReactNode) => ReactNode
  * a box under the chart instead, so that it never covers the lines it describes.
  */
 function ChartBox({ height, children, legend }: { height: number; children: (tip: Tip) => ReactElement; legend?: ReactNode }) {
-  const docked = useDockedTips()
+  const docked = useMediaQuery(DOCK_QUERY)
   const [dock, setDock] = useState<HTMLDivElement | null>(null)
   const tip: Tip = (body) => (docked && dock && body ? createPortal(body, dock) : body)
   return (

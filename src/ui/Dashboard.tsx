@@ -1,10 +1,10 @@
 import { useDeferredValue, useMemo, useState, type CSSProperties } from 'react'
 import { improvementHints } from '../engine/hints'
 import { accountLabels, simulate } from '../engine/simulate'
-import { kpis, yearly, type Kpis, type YearRow } from '../engine/summary'
+import { kpis, shortfallScore, yearly, type Kpis, type YearRow } from '../engine/summary'
 import type { Plan } from '../engine/types'
 import { AssetChart, CashflowChart, ExpenseChart } from './Charts'
-import { man, manOku, pct, ymLabel } from './format'
+import { man, manOku, pct, shortfallLabel, shortfallNotes, ymLabel } from './format'
 import { YearDetail } from './YearDetail'
 
 interface Adjust {
@@ -53,24 +53,31 @@ export function Dashboard({ plan, onApply, real }: { plan: Plan; onApply: (p: Pl
   const selected = years.find((y) => y.year === selectedYear)
   const labels = accountLabels(effective, result)
   const adults = plan.members.filter((m) => m.role !== 'child')
+  const notes = [...shortfallNotes(k), ...result.warnings]
 
   return (
     <div className="dashboard">
-      {result.warnings.length > 0 && (
+      {notes.length > 0 && (
         <div className="callout warn" role="status">
-          {result.warnings.map((w) => (
+          {notes.map((w) => (
             <p key={w}>{w}</p>
           ))}
         </div>
       )}
 
       <div className="kpis">
-        <Kpi
-          label={k.firstShortfall ? '資金が尽きる時期' : '資金ショート'}
-          value={k.firstShortfall ? `${k.firstShortfall.age}歳` : 'なし'}
-          sub={k.firstShortfall ? ymLabel(k.firstShortfall.ym) : `${k.finalAssets.age}歳まで`}
-          tone={k.firstShortfall ? 'bad' : 'good'}
-        />
+        {k.depletion ? (
+          <Kpi label="お金が尽きる時期" value={`${k.depletion.age}歳`} sub={ymLabel(k.depletion.ym)} tone="bad" />
+        ) : k.gap ? (
+          <Kpi
+            label="一時的に足りなくなる額"
+            value={`最大${man(k.gap.maxDeficit)}`}
+            sub={`${k.gap.fromAge === k.gap.toAge ? `${k.gap.fromAge}歳` : `${k.gap.fromAge}〜${k.gap.toAge}歳`}。その後は持ち直す`}
+            tone="warn"
+          />
+        ) : (
+          <Kpi label="お金が尽きる時期" value="なし" sub={`${k.finalAssets.age}歳まで`} tone="good" />
+        )}
         {k.assetsAtRetirement && <Kpi label={`定年（${k.assetsAtRetirement.age}歳）時点の資産`} value={man(k.assetsAtRetirement.value)} />}
         {k.retirementMonthly && (
           <Kpi
@@ -225,10 +232,10 @@ function Gain({ value, base }: { value?: number; base?: number }) {
   return <span className={d > 0 ? 'pos' : 'neg'}>{`${d > 0 ? '+' : '−'}${Math.abs(d).toLocaleString('ja-JP')}万円`}</span>
 }
 
-function ShortfallAge({ age, base }: { age?: number; base?: number }) {
-  const a = age ?? Infinity
-  const b = base ?? Infinity
-  return <span className={a > b ? 'pos' : a < b ? 'neg' : 'muted'}>{age === undefined ? '尽きない' : `${age}歳`}</span>
+function ShortfallCell({ k, base }: { k: Kpis; base: Kpis }) {
+  const a = shortfallScore(k)
+  const b = shortfallScore(base)
+  return <span className={a > b ? 'pos' : a < b ? 'neg' : 'muted'}>{shortfallLabel(k).text}</span>
 }
 
 /** One change at a time, ranked by how much it adds to the final assets. */
@@ -264,7 +271,7 @@ function HintsPanel({ plan, base, real }: { plan: Plan; base: Kpis; real: boolea
               <th className="text">見直し</th>
               <th>{base.finalAssets.age}歳時点の資産</th>
               <th>定年時点の資産</th>
-              <th>資金が尽きる年齢</th>
+              <th>お金が足りなくなる時期</th>
             </tr>
           </thead>
           <tbody>
@@ -285,7 +292,7 @@ function HintsPanel({ plan, base, real }: { plan: Plan; base: Kpis; real: boolea
                     <Gain value={r.k.assetsAtRetirement?.value} base={base.assetsAtRetirement?.value} />
                   </td>
                   <td>
-                    <ShortfallAge age={r.k.firstShortfall?.age} base={base.firstShortfall?.age} />
+                    <ShortfallCell k={r.k} base={base} />
                   </td>
                 </tr>
               )
@@ -326,7 +333,7 @@ function ExpenseStats({ years, real }: { years: YearRow[]; real: boolean }) {
   )
 }
 
-function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'good' | 'bad' }) {
+function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad' }) {
   return (
     <div className={`kpi ${tone ?? ''}`}>
       <span className="kpi-label">{label}</span>

@@ -154,14 +154,57 @@ export function yearly(result: SimulationResult, real = false): YearRow[] {
   return out
 }
 
+/** A run of months short of money: cash below zero with nothing left to sell. */
+export interface ShortfallSpan {
+  from: MonthRow
+  to: MonthRow
+  /** The most money missing at any point (how far cash went below zero). */
+  maxDeficit: number
+  /** Lasts to the end of the simulation: the money runs out for good. */
+  toEnd: boolean
+}
+
+export function shortfallSpans(rows: MonthRow[]): ShortfallSpan[] {
+  const spans: ShortfallSpan[] = []
+  let cur: ShortfallSpan | undefined
+  for (const r of rows) {
+    if (!r.shortfall) {
+      cur = undefined
+      continue
+    }
+    if (!cur) {
+      cur = { from: r, to: r, maxDeficit: 0, toEnd: false }
+      spans.push(cur)
+    }
+    cur.to = r
+    cur.maxDeficit = Math.max(cur.maxDeficit, -r.cash)
+  }
+  const last = spans.at(-1)
+  if (last && last.to === rows.at(-1)) last.toEnd = true
+  return spans
+}
+
 export interface Kpis {
   peakAssets: { value: number; year: number; age: number }
   minCash: { value: number; ym: string; age: number }
-  firstShortfall?: { ym: string; age: number }
+  /** The money runs out for good (short of money from then to the end). */
+  depletion?: { ym: string; age: number }
+  /**
+   * The first time money is short for a while and then recovers (e.g. a down payment larger than the savings),
+   * and how many such times there are.
+   */
+  gap?: { fromYm: string; fromAge: number; toYm: string; toAge: number; maxDeficit: number; events: string[]; count: number }
   assetsAtRetirement?: { value: number; age: number }
   finalAssets: { value: number; age: number }
   /** Average monthly take-home minus expenses from the retirement age to 90 (negative = drawing down). */
   retirementMonthly?: { value: number; fromAge: number; toAge: number }
+}
+
+/** Orders results by how bad the shortage of money is: higher is better (none > a brief gap > running out later). */
+export function shortfallScore(k: Pick<Kpis, 'depletion' | 'gap'>): number {
+  if (k.depletion) return k.depletion.age
+  if (k.gap) return 1e15 - k.gap.maxDeficit
+  return 2e15
 }
 
 export function kpis(plan: Plan, result: SimulationResult, retirementAge?: number, real = false): Kpis {
@@ -173,7 +216,10 @@ export function kpis(plan: Plan, result: SimulationResult, retirementAge?: numbe
     if (r.totalAssets > peak.totalAssets) peak = r
     if (r.cash < minCash.cash) minCash = r
   }
-  const short = rows.find((r) => r.shortfall)
+  const spans = shortfallSpans(rows)
+  const end = spans.find((s) => s.toEnd)
+  const temporary = spans.filter((s) => !s.toEnd)
+  const gap = temporary[0]
   const atRet = retirementAge !== undefined ? rows.find((r) => r.ages[selfId] === retirementAge) : undefined
   const last = rows[rows.length - 1]
   let retirementMonthly: Kpis['retirementMonthly']
@@ -190,7 +236,18 @@ export function kpis(plan: Plan, result: SimulationResult, retirementAge?: numbe
   return {
     peakAssets: { value: peak.totalAssets, year: Math.floor(peak.t / 12), age: peak.ages[selfId] },
     minCash: { value: minCash.cash, ym: minCash.ym, age: minCash.ages[selfId] },
-    firstShortfall: short ? { ym: short.ym, age: short.ages[selfId] } : undefined,
+    depletion: end ? { ym: end.from.ym, age: end.from.ages[selfId] } : undefined,
+    gap: gap
+      ? {
+          fromYm: gap.from.ym,
+          fromAge: gap.from.ages[selfId],
+          toYm: gap.to.ym,
+          toAge: gap.to.ages[selfId],
+          maxDeficit: gap.maxDeficit,
+          events: gap.from.events,
+          count: temporary.length,
+        }
+      : undefined,
     assetsAtRetirement: atRet ? { value: atRet.totalAssets, age: retirementAge! } : undefined,
     finalAssets: { value: last.totalAssets, age: last.ages[selfId] },
     retirementMonthly,

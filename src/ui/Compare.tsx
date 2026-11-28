@@ -23,7 +23,7 @@ import type { Plan } from '../engine/types'
 import { normalizeWizard } from '../engine/wizard'
 import { CompareChart } from './Charts'
 import { ManField, MonthField, NumField, PercentField, SelectField } from './fields'
-import { man, manOku } from './format'
+import { man, manOku, shortfallLabel } from './format'
 import { newId } from './store'
 
 type Mode = 'scenario' | 'plans'
@@ -379,7 +379,7 @@ function ScenarioCompare({ plan, real, onSave }: { plan: Plan; real: boolean; on
                           {multiWork && <LineSample color={colorOf(r)} dashed={r.housing === 'rent'} />}
                           <strong className={v < 0 ? 'neg' : ''}>{man(v)}</strong>
                           {r.isCurrent ? <small className="diff">いまのプラン</small> : <Diff value={v} base={metricOf(base, metric)} />}
-                          {r.k.firstShortfall && <small className="neg">{r.k.firstShortfall.age}歳で資金が尽きる</small>}
+                          {(r.k.depletion || r.k.gap) && <small className={shortfallLabel(r.k).className}>{shortfallLabel(r.k).text}</small>}
                         </td>
                       )
                     }),
@@ -424,7 +424,7 @@ function ScenarioCompare({ plan, real, onSave }: { plan: Plan; real: boolean; on
             <thead>
               <tr>
                 <th className="text">パターン</th>
-                <th>資金が尽きる年齢</th>
+                <th>お金が足りなくなる時期</th>
                 <th>定年時点の資産</th>
                 <th>預貯金の最少</th>
                 <th>老後の毎月の収支</th>
@@ -444,7 +444,7 @@ function ScenarioCompare({ plan, real, onSave }: { plan: Plan; real: boolean; on
                     <LineSample color={colorOf(r)} dashed={r.housing === 'rent'} />
                     {name(r)}
                   </th>
-                  <td className={r.k.firstShortfall ? 'neg' : ''}>{r.k.firstShortfall ? `${r.k.firstShortfall.age}歳` : 'なし'}</td>
+                  <td className={shortfallLabel(r.k).className}>{shortfallLabel(r.k).text}</td>
                   <td>
                     {r.k.assetsAtRetirement ? man(r.k.assetsAtRetirement.value) : '—'}
                     {r.k.assetsAtRetirement && base.k.assetsAtRetirement && !r.isCurrent && (
@@ -576,10 +576,10 @@ function PlanCompare({ plans, real }: { plans: Plan[]; real: boolean }) {
             </thead>
             <tbody>
               <tr>
-                <th className="text">資金が尽きる年齢</th>
+                <th className="text">お金が足りなくなる時期</th>
                 {data.map((d) => (
-                  <td key={d.plan.id} className={d.k.firstShortfall ? 'neg' : ''}>
-                    {d.k.firstShortfall ? `${d.k.firstShortfall.age}歳` : 'なし'}
+                  <td key={d.plan.id} className={shortfallLabel(d.k).className}>
+                    {shortfallLabel(d.k).text}
                   </td>
                 ))}
               </tr>

@@ -11,6 +11,7 @@ import { currentYM } from './ui/format'
 import { Modal } from './ui/Modal'
 import { Risk } from './ui/Risk'
 import { canShare, clearSharedPlanFromUrl, hasSharedPlan, readSharedPlan, shareUrl } from './ui/share'
+import { useMediaQuery } from './ui/useMediaQuery'
 import {
   downloadAllPlans,
   downloadJson,
@@ -40,6 +41,9 @@ const TABS: { id: Tab; label: string }[] = [
 
 const SHOWS_AMOUNTS: Tab[] = ['result', 'table', 'compare', 'risk']
 
+/** Phones: a shorter header, with every tab in view. Same width as the layout breakpoint in styles.css. */
+const NARROW = '(max-width: 720px)'
+
 /** Plans waiting for the user to choose how to take them in (from a file or a shared link). */
 type Incoming = { source: 'file' | 'link'; plans: Plan[] } | { source: 'file' | 'link'; error: string }
 
@@ -56,6 +60,7 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDetailsElement>(null)
   const hasOwnPlans = plans.some((p) => p.id !== 'sample')
+  const narrow = useMediaQuery(NARROW)
 
   // the sample's answers are not offered for editing: かんたん入力 on the sample creates a new plan
   const ownWizard = active.id === 'sample' ? undefined : active.wizard
@@ -77,6 +82,16 @@ export default function App() {
   }, [hasOwnPlans])
 
   const closeMenu = () => menuRef.current?.removeAttribute('open')
+
+  // the menu closes when tapping or clicking anywhere else
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const m = menuRef.current
+      if (m?.open && !m.contains(e.target as Node)) m.removeAttribute('open')
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [])
 
   const finishWizard = (w: Parameters<typeof buildPlan>[0]) => {
     if (ownWizard) store.update(buildPlan(w, active.id, active.name))
@@ -125,6 +140,46 @@ export default function App() {
     setReminder(false)
     closeMenu()
   }
+  const duplicate = () => {
+    closeMenu()
+    store.duplicate(active.id)
+  }
+  const rename = () => {
+    closeMenu()
+    const name = prompt('プラン名', active.name)
+    if (name) store.update({ ...active, name })
+  }
+  const remove = () => {
+    closeMenu()
+    if (confirm(`「${active.name}」を削除します。元に戻せません。よろしいですか？`)) store.remove(active.id)
+  }
+
+  const saveItems = (
+    <>
+      <button type="button" className="link" onClick={saveAll}>
+        すべてのプランをファイルに保存
+      </button>
+      <button type="button" className="link" onClick={() => fileRef.current?.click()}>
+        ファイルから読み込む
+      </button>
+      {canShare() && (
+        <button type="button" className="link" onClick={makeLink}>
+          このプランを共有するリンクを作る
+        </button>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          if (f) importJson(f)
+        }}
+      />
+    </>
+  )
 
   return (
     <div className="app">
@@ -144,53 +199,41 @@ export default function App() {
               ))}
             </select>
           </label>
-          <button type="button" className="secondary" onClick={() => store.duplicate(active.id)} title="条件を変えて比べるために、いまのプランをコピーします">
-            複製
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              const name = prompt('プラン名', active.name)
-              if (name) store.update({ ...active, name })
-            }}
-          >
-            名前を変更
-          </button>
-          <button
-            type="button"
-            className="secondary danger"
-            onClick={() => confirm(`「${active.name}」を削除します。元に戻せません。よろしいですか？`) && store.remove(active.id)}
-          >
-            削除
-          </button>
-          <details className="menu" ref={menuRef}>
-            <summary className="secondary">保存・共有</summary>
-            <div className="menu-body">
-              <button type="button" className="link" onClick={saveAll}>
-                すべてのプランをファイルに保存
-              </button>
-              <button type="button" className="link" onClick={() => fileRef.current?.click()}>
-                ファイルから読み込む
-              </button>
-              {canShare() && (
-                <button type="button" className="link" onClick={makeLink}>
-                  このプランを共有するリンクを作る
+          {narrow ? (
+            // phones: the plan actions and saving share one menu, so the header stays short
+            <details className="menu" ref={menuRef}>
+              <summary className="secondary">メニュー</summary>
+              <div className="menu-body">
+                <button type="button" className="link" onClick={duplicate}>
+                  このプランを複製
                 </button>
-              )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  e.target.value = ''
-                  if (f) importJson(f)
-                }}
-              />
-            </div>
-          </details>
+                <button type="button" className="link" onClick={rename}>
+                  名前を変更
+                </button>
+                <button type="button" className="link danger" onClick={remove}>
+                  このプランを削除
+                </button>
+                <hr />
+                {saveItems}
+              </div>
+            </details>
+          ) : (
+            <>
+              <button type="button" className="secondary" onClick={duplicate} title="条件を変えて比べるために、いまのプランをコピーします">
+                複製
+              </button>
+              <button type="button" className="secondary" onClick={rename}>
+                名前を変更
+              </button>
+              <button type="button" className="secondary danger" onClick={remove}>
+                削除
+              </button>
+              <details className="menu" ref={menuRef}>
+                <summary className="secondary">保存・共有</summary>
+                <div className="menu-body">{saveItems}</div>
+              </details>
+            </>
+          )}
         </div>
       </header>
 

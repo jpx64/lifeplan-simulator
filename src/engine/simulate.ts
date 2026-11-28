@@ -1074,8 +1074,6 @@ export function simulate(plan: Plan): SimulationResult {
   if (purchaseT !== undefined && rents.some((r) => inRange(purchaseT + 1, r.from, r.to))) {
     warnings.push('住宅の購入後も家賃がかかる設定になっています。賃貸の終了月を確認してください。')
   }
-  const firstShort = rows.find((r) => r.shortfall)
-  if (firstShort) warnings.push(`${firstShort.ym} に資金が不足します（預金がマイナスになり、取り崩せる資産も残っていません）。`)
   for (const a of overflowAccounts) {
     if (rows.some((r) => (r.accounts[a.id]?.contribution ?? 0) > 0)) warnings.push(`NISAの非課税枠を超えた積立を「${a.label}」に回しました。`)
   }
