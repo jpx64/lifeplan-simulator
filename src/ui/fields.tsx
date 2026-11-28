@@ -75,16 +75,6 @@ export function ManField(props: { label: string; value: number; onChange: (v: nu
   )
 }
 
-/** Yen amount entered in 円. */
-export function YenField(props: { label: string; value: number; onChange: (v: number) => void; hint?: ReactNode }) {
-  const id = useId()
-  return (
-    <Field label={props.label} hint={props.hint} id={id}>
-      <NumberInput id={id} value={props.value} onChange={props.onChange} step={1000} suffix="円" />
-    </Field>
-  )
-}
-
 export function PercentField(props: { label: string; value: number; onChange: (v: number) => void; hint?: ReactNode; step?: number }) {
   const id = useId()
   return (

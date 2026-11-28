@@ -15,7 +15,7 @@ import type {
   RentPeriod,
   WorkPeriod,
 } from '../engine/types'
-import { CheckField, ManField, MonthField, NumField, PercentField, SelectField, TextField, YenField } from './fields'
+import { CheckField, ManField, MonthField, NumField, PercentField, SelectField, TextField } from './fields'
 import { man } from './format'
 import { newId } from './store'
 
@@ -242,7 +242,7 @@ export function Editor({ plan, onChange }: { plan: Plan; onChange: (p: Plan) => 
                   onChange={(v) => up({ frequency: v })}
                 />
                 {e.frequency === 'annual' && <NumField label="支払う月" value={e.month ?? 12} onChange={(v) => up({ month: v })} suffix="月" min={1} max={12} />}
-                <YenField label="金額（いまの価値）" value={e.amount} onChange={(v) => up({ amount: v })} />
+                <ManField label="金額（いまの価値）" value={e.amount} onChange={(v) => up({ amount: v })} step={0.1} />
                 <MonthField label="開始（空欄なら最初から）" value={e.from} onChange={(v) => up({ from: v })} optional />
                 <MonthField label="終了（空欄なら最後まで）" value={e.to} onChange={(v) => up({ to: v })} optional />
                 <CheckField label="インフレで増える" checked={e.inflate} onChange={(v) => up({ inflate: v })} />
@@ -621,9 +621,9 @@ function HousingSection({ plan, onChange, memberOptions }: { plan: Plan; onChang
               <CheckField
                 label="納税通知書の金額を使う"
                 checked={p.propertyTaxOverride !== undefined}
-                onChange={(v) => upP({ propertyTaxOverride: v ? Math.round(propertyTaxAnnual({ ...p, propertyTaxOverride: undefined }, 1)) : undefined })}
+                onChange={(v) => upP({ propertyTaxOverride: v ? Math.round(propertyTaxAnnual({ ...p, propertyTaxOverride: undefined }, 1) / 100) * 100 : undefined })}
               />
-              {p.propertyTaxOverride !== undefined && <YenField label="年税額" value={p.propertyTaxOverride} onChange={(v) => upP({ propertyTaxOverride: v })} />}
+              {p.propertyTaxOverride !== undefined && <ManField label="年税額" value={p.propertyTaxOverride} onChange={(v) => upP({ propertyTaxOverride: v })} step={0.5} />}
             </div>
           </>
         )}
